@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pêche entre potes</title>
+    <meta name="description" content="Petit jeu de pêche en 3D, entre amis, jusqu'à 4 joueurs." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="scene" tabindex="-1" aria-label="Vue 3D de l'île"></canvas>
+    <div class="vignette" aria-hidden="true"></div>
+
+    <main id="creation" class="panneau">
+      <header>
+        <h1>Pêche entre potes</h1>
+        <p class="accroche">Crée ton pêcheur, puis invite jusqu'à trois amis.</p>
+      </header>
+
+      <label class="champ-nom">
+        <span>Ton nom</span>
+        <input id="nom" type="text" maxlength="16" autocomplete="nickname" spellcheck="false" placeholder="Ex. Melvin" />
+      </label>
+
+      <div class="defilement">
+        <div id="options"></div>
+        <button id="aleatoire" type="button" class="secondaire">Tirer au hasard</button>
+      </div>
+
+      <div id="actions-accueil" class="actions">
+        <button id="creer" type="button" class="principal">Créer un salon</button>
+        <div class="rejoindre">
+          <input id="code" type="text" maxlength="4" autocomplete="off" spellcheck="false" placeholder="Code" aria-label="Code du salon" />
+          <button id="rejoindre" type="button">Rejoindre</button>
+        </div>
+      </div>
+      <div id="actions-edition" class="actions" hidden>
+        <button id="retour" type="button" class="principal">Retour sur l'île</button>
+      </div>
+
+      <p id="erreur" class="erreur" role="alert" hidden></p>
+      <p id="attente" class="note" hidden>Connexion au salon…</p>
+      <p id="mode-local" class="note" hidden>
+        Mode local : Supabase n'est pas configuré, le salon ne relie que les onglets de ce navigateur.
+      </p>
+    </main>
+
+    <section id="hud" hidden>
+      <div class="carte salon">
+        <div class="entete-salon">
+          <span>Salon</span>
+          <strong id="code-salon"></strong>
+          <button id="copier" type="button">Copier le lien</button>
+        </div>
+        <ul id="joueurs"></ul>
+        <p class="compteur"><span id="nb-joueurs">1</span>/<span id="nb-max">4</span> joueurs</p>
+      </div>
+      <div class="boutons-hud">
+        <button id="modifier" type="button" class="carte">Modifier mon perso</button>
+        <button id="quitter" type="button" class="carte">Quitter</button>
+      </div>
+      <p class="aide">ZQSD ou WASD : marcher · Maj : courir · Espace : sauter · clic-glisser : tourner · molette : zoom</p>
+      <p id="reseau" class="alerte-reseau" hidden>Connexion perdue, reconnexion…</p>
+    </section>
+
+    <div id="notifications" aria-live="polite"></div>
+    <p id="sans-webgl" class="sans-webgl" hidden>Ton navigateur ne peut pas afficher la 3D (WebGL indisponible).</p>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

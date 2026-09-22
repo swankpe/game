@@ -13,8 +13,14 @@ export function creerOrbite(camera, element) {
   let glisse = null;
 
   element.addEventListener('pointerdown', (e) => {
+    // Souris verrouillée (vue à la première personne) : l'orbite ne sert pas.
+    if (document.pointerLockElement) return;
     glisse = { x: e.clientX, y: e.clientY, id: e.pointerId };
-    element.setPointerCapture(e.pointerId);
+    try {
+      element.setPointerCapture(e.pointerId);
+    } catch {
+      // Capture refusée : le glissé marche quand même tant que la souris reste sur la scène.
+    }
   });
   element.addEventListener('pointermove', (e) => {
     if (!glisse || e.pointerId !== glisse.id) return;

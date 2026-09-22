@@ -25,7 +25,7 @@ test("un membre mal formé reçoit des valeurs sûres, jamais inventées", () =>
   assert.equal(m.apparence.peau, '#e3bf86');
   assert.equal(m.arrivee, Infinity);
   assert.equal(m.installe, false);
-  assert.equal(membreDepuisMeta('y', null).nom, 'Pêcheur');
+  assert.equal(membreDepuisMeta('y', null).nom, 'Joueur');
 });
 
 const membre = (id, arrivee, installe = false) => ({ id, arrivee, installe });

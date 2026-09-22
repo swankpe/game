@@ -2,7 +2,6 @@
 // positions lissées entre deux messages (qui arrivent environ 10 fois par
 // seconde au plus).
 
-import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { APPARITION } from './monde.js';
 import { animerPersonnage, creerPersonnage, libererPersonnage } from './personnage.js';
@@ -15,7 +14,8 @@ function etatValide(e) {
   if (![x, y, z, e.r].every(Number.isFinite)) return null;
   if ([x, y, z].some((v) => Math.abs(v) > LIMITE)) return null;
   const v = Number.isFinite(e.v) ? Math.min(Math.max(e.v, 0), 20) : 0;
-  return { x, y, z, r: e.r, v };
+  const vp = Number.isFinite(e.vp) ? Math.min(Math.max(e.vp, -1.6), 1.6) : 0;
+  return { x, y, z, r: e.r, v, vp };
 }
 
 export function creerAvatars(scene) {
@@ -52,7 +52,7 @@ export function creerAvatars(scene) {
         if (!avatar) {
           const div = document.createElement('div');
           div.className = 'etiquette';
-          avatar = { etiquette: new CSS2DObject(div), cible: null, vitesse: 0, nom: '' };
+          avatar = { id: membre.id, etiquette: new CSS2DObject(div), cible: null, vitesse: 0, nom: '' };
           avatars.set(membre.id, avatar);
           arrives.push(membre.nom);
         }
@@ -83,7 +83,8 @@ export function creerAvatars(scene) {
       avatar.cible = e;
     },
 
-    mettreAJour(dt) {
+    // poseDe(id) : 'libre' | 'arme' | 'porte' | 'attache', choisi selon le rôle.
+    mettreAJour(dt, poseDe = () => 'libre') {
       const t = 1 - Math.exp(-dt * 10);
       for (const avatar of avatars.values()) {
         const { modele, cible } = avatar;
@@ -95,8 +96,32 @@ export function creerAvatars(scene) {
           modele.rotation.y += d * t;
           avatar.vitesse += (cible.v - avatar.vitesse) * t;
         }
-        animerPersonnage(modele, dt, { vitesse: avatar.vitesse });
+        animerPersonnage(modele, dt, { vitesse: avatar.vitesse, pose: poseDe(avatar.id) });
       }
+    },
+
+    // Position affichée (lissée) et regard, pour accrocher le poteau porté ou
+    // orienter la lanterne d'un protégé distant.
+    positionDe(id) {
+      const a = avatars.get(id);
+      if (!a?.cible) return null;
+      const { position, rotation } = a.modele;
+      return { x: position.x, y: position.y, z: position.z, r: rotation.y, vp: a.cible.vp };
+    },
+
+    // Impose la position affichée (le protégé suit le poteau, même porté).
+    placer(id, x, y, z, r) {
+      const a = avatars.get(id);
+      if (!a) return;
+      a.modele.position.set(x, y, z);
+      a.modele.rotation.y = r;
+    },
+
+    // Dernières positions reçues, pour la simulation de l'hôte.
+    positions() {
+      const carte = new Map();
+      for (const [id, a] of avatars) if (a.cible) carte.set(id, { x: a.cible.x, z: a.cible.z, r: a.cible.r });
+      return carte;
     },
 
     get nombre() {

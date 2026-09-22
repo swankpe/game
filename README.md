@@ -1,26 +1,48 @@
-# Pêche entre potes
+# Le Protégé
 
-Petit jeu de pêche en 3D, dans le navigateur, entre amis (4 joueurs maximum).
-Rien à installer pour jouer : on s'envoie un lien.
+Jeu coopératif en 3D, dans le navigateur, pour 4 amis. L'un de vous, ligoté à
+un poteau, sert de lanterne à l'équipe ; les trois autres le défendent contre
+des vagues de zombies qui sortent de la mer. Rien à installer : on s'envoie un
+lien.
 
-**État actuel :** l'île, la création du perso et le salon multijoueur. La pêche
-elle-même est la prochaine étape.
+## Règles (premier brouillon)
+
+- **4 joueurs** : 1 protégé, 3 défenseurs. Le protégé est tiré au sort à
+  chaque manche.
+- **Manche de 5 minutes**, de plus en plus de zombies d'une manche à l'autre.
+  Survivre jusqu'au bout gagne la manche ; si le protégé meurt, c'est la défaite
+  et tout le monde retourne au camp.
+- **La nuit**, on ne voit bien que ce qu'éclaire la lanterne du protégé.
+- **Le protégé** ne bouge pas : il dirige la lanterne avec la souris.
+  **F** lance l'**Illumination** : toute l'île éclairée pendant 30 secondes,
+  puis 3 minutes de recharge.
+- **Les défenseurs** tirent au pistolet (3 balles par zombie, 2 dans la tête)
+  et peuvent **porter le poteau** (**E**) pour le déplacer, avec le protégé
+  dessus. En portant, on ne tire pas et on avance moins vite.
 
 ## Jouer
 
-1. Un joueur ouvre le jeu, crée son perso, clique **Créer un salon**.
-2. Il clique **Copier le lien** et l'envoie aux autres (ou leur dicte le code à 4 caractères).
-3. Les autres ouvrent le lien, créent leur perso, cliquent **Rejoindre**.
+1. Crée ton perso (le camp est en plein jour), puis **Créer un salon**.
+2. **Copier le lien** et envoie-le (ou dicte le code à 4 caractères).
+3. Quand tout le monde est là : **Lancer la partie** (ou Entrée).
+
+**Tester seul :** lance la partie sans attendre personne et choisis ton rôle.
+En défenseur, un mannequin de paille est attaché au poteau et sa lanterne suit
+le zombie le plus proche. En protégé, personne ne te défend : de quoi essayer
+la lanterne et l'Illumination.
 
 | Commande | Action |
 | --- | --- |
-| ZQSD (AZERTY) ou WASD (QWERTY), flèches | marcher |
+| clic sur la scène | prendre la souris (Échap pour la libérer) |
+| ZQSD (AZERTY) ou WASD (QWERTY) | marcher |
+| souris | viser / diriger la lanterne |
+| clic gauche | tirer |
+| E | porter / poser le poteau |
+| F | Illumination (protégé) |
 | Maj | courir |
 | Espace | sauter |
-| clic-glisser | tourner la caméra |
-| molette | zoomer |
 
-Le perso est gardé dans le navigateur : pas besoin de le refaire à chaque partie.
+PC uniquement (clavier + souris).
 
 ## Développer
 
@@ -35,6 +57,9 @@ seulement les onglets du même navigateur. Ouvre deux onglets pour tester à deu
 
 ## Mettre en ligne (Supabase + Vercel)
 
+Le projet Vercel `game` est déjà relié à ce dépôt : chaque push sur `main`
+redéploie.
+
 ### 1. Supabase
 
 1. Crée un projet (l'offre gratuite suffit).
@@ -48,20 +73,18 @@ canaux privés dans les réglages du projet, rouvre l'accès public.
 
 ### 2. Vercel
 
-1. Importe le dépôt GitHub dans Vercel : Vite est détecté tout seul
-   (`npm run build`, dossier `dist`).
-2. Ajoute les variables d'environnement (Production et Preview) :
+1. Ajoute les variables d'environnement (Production et Preview) :
 
    | Variable | Valeur |
    | --- | --- |
    | `VITE_SUPABASE_URL` | `https://xxxx.supabase.co` |
    | `VITE_SUPABASE_ANON_KEY` | la clé publique |
 
-3. Dans *Settings → Deployment Protection → Vercel Authentication*, choisis
+2. Dans *Settings → Deployment Protection → Vercel Authentication*, choisis
    **Standard Protection** : l'adresse de production reste publique, seuls les
    aperçus demandent un compte Vercel. Avec « All Deployments », tes amis
    tomberaient sur une page de connexion Vercel.
-4. Redéploie : les variables `VITE_` sont intégrées au moment du build, une
+3. Redéploie : les variables `VITE_` sont intégrées au moment du build, une
    variable ajoutée après coup n'est prise en compte qu'au déploiement suivant.
 
 Pour jouer en ligne depuis ton poste, copie `.env.example` en `.env.local` et
@@ -69,11 +92,14 @@ remplis les deux valeurs.
 
 ## Bon à savoir
 
+- **Qui fait tourner les zombies ?** Le navigateur du premier joueur du salon
+  (l'hôte). S'il part, le suivant reprend la partie là où elle en était.
 - **Pause Supabase :** un projet gratuit est mis en pause après une semaine sans
   activité. Si le salon ne se connecte plus, réactive le projet depuis le
   tableau de bord Supabase.
-- **Quota de messages :** chaque joueur qui bouge envoie sa position au plus
-  10 fois par seconde ; immobile, un simple rappel toutes les 4 secondes. Le
-  suivi se fait dans l'onglet *Usage* de Supabase.
+- **Quota de messages :** pendant une manche, l'hôte envoie l'état du monde
+  6 fois par seconde et chaque joueur sa position jusqu'à 10 fois par seconde.
+  Une manche à 4 représente quelques dizaines de milliers de messages ; le
+  quota gratuit de Supabase est mensuel, surveille l'onglet *Usage*.
 - **Accès :** qui connaît le code peut entrer (environ 920 000 codes
   possibles). Suffisant entre amis, ce n'est pas un contrôle d'accès.

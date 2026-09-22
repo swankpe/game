@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Jeu de pêche en 3D entre amis, dans le navigateur (4 joueurs).",
+  "description": "Le Protégé : jeu coopératif en 3D, dans le navigateur, pour 4 amis.",
   "engines": {
     "node": ">=20"
   },

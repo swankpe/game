@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Pêche entre potes</title>
-    <meta name="description" content="Petit jeu de pêche en 3D, entre amis, jusqu'à 4 joueurs." />
+    <title>Le Protégé</title>
+    <meta name="description" content="Jeu coopératif en 3D pour 4 amis : protégez celui qui porte la lumière." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,8 +17,8 @@
 
     <main id="creation" class="panneau">
       <header>
-        <h1>Pêche entre potes</h1>
-        <p class="accroche">Crée ton pêcheur, puis invite jusqu'à trois amis.</p>
+        <h1>Le Protégé</h1>
+        <p class="accroche">Crée ton perso, puis invite jusqu'à trois amis.</p>
       </header>
 
       <label class="champ-nom">
@@ -63,9 +63,39 @@
         <button id="modifier" type="button" class="carte">Modifier mon perso</button>
         <button id="quitter" type="button" class="carte">Quitter</button>
       </div>
-      <p class="aide">ZQSD ou WASD : marcher · Maj : courir · Espace : sauter · clic-glisser : tourner · molette : zoom</p>
+      <div id="partie" class="carte bandeau-partie" hidden>
+        <strong id="manche"></strong>
+        <span id="chrono"></span>
+        <span id="tues"></span>
+      </div>
+      <div id="vie" class="carte vie" hidden>
+        <span class="vie-titre">Protégé</span>
+        <span id="vie-nom"></span>
+        <div class="jauge"><div id="vie-barre"></div></div>
+      </div>
+      <p id="illumination" class="illumination" hidden></p>
+
+      <div id="lancement" class="carte lancement">
+        <p id="texte-lancement"></p>
+        <div id="role-solo" class="choix-role" hidden>
+          <button type="button" class="forme" data-role="defenseur">Défenseur</button>
+          <button type="button" class="forme" data-role="protege">Protégé</button>
+        </div>
+        <button id="lancer" type="button" class="principal">Lancer la partie</button>
+        <p class="note">ou appuie sur Entrée</p>
+      </div>
+
+      <div id="viseur" class="viseur" hidden></div>
+      <p id="indication" class="indication" hidden></p>
+      <div id="annonce" class="annonce" hidden>
+        <strong id="annonce-titre"></strong>
+        <span id="annonce-detail"></span>
+      </div>
+      <p id="reprendre" class="reprendre" hidden>Clique pour jouer</p>
+      <p id="aide" class="aide"></p>
       <p id="reseau" class="alerte-reseau" hidden>Connexion perdue, reconnexion…</p>
     </section>
+    <div id="degats" class="degats" aria-hidden="true"></div>
 
     <div id="notifications" aria-live="polite"></div>
     <p id="sans-webgl" class="sans-webgl" hidden>Ton navigateur ne peut pas afficher la 3D (WebGL indisponible).</p>

@@ -10,17 +10,30 @@ const GRAVITE = 15;
 
 export function creerClavier() {
   const enfoncees = new Set();
+  // Appuis pas encore traités (E pour porter, F pour l'Illumination…).
+  const appuis = new Set();
   const enSaisie = (e) => e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]');
   addEventListener('keydown', (e) => {
     if (enSaisie(e)) return;
     enfoncees.add(e.code);
+    if (!e.repeat) appuis.add(e.code);
     // Espace ne doit ni faire défiler la page ni recliquer le dernier bouton.
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
   });
   addEventListener('keyup', (e) => enfoncees.delete(e.code));
-  addEventListener('blur', () => enfoncees.clear());
+  addEventListener('blur', () => {
+    enfoncees.clear();
+    appuis.clear();
+  });
   const une = (...codes) => codes.some((c) => enfoncees.has(c));
   return {
+    // Vrai une seule fois par appui.
+    consommer(code) {
+      return appuis.delete(code);
+    },
+    oublier() {
+      appuis.clear();
+    },
     commandes() {
       return {
         avant: Number(une('KeyW', 'ArrowUp')) - Number(une('KeyS', 'ArrowDown')),
@@ -60,14 +73,23 @@ export function creerJoueur() {
 
   return {
     etat,
+    teleporter(x, z, orientation = etat.orientation) {
+      etat.x = x;
+      etat.z = z;
+      etat.y = hauteurSol(x, z);
+      etat.vx = etat.vz = etat.vy = 0;
+      etat.orientation = orientation;
+    },
     // lacet : angle horizontal de la caméra, pour avancer « vers l'écran ».
-    mettreAJour(dt, commandes, lacet) {
+    // orientation : impose le sens du corps (vue à la première personne) ;
+    // facteur : vitesse réduite, par exemple en portant le poteau.
+    mettreAJour(dt, commandes, lacet, { orientation = null, facteur = 1 } = {}) {
       const { avant, lateral, course, saut } = commandes;
       const fx = -Math.sin(lacet), fz = -Math.cos(lacet);
       const rx = Math.cos(lacet), rz = -Math.sin(lacet);
       let dx = fx * avant + rx * lateral, dz = fz * avant + rz * lateral;
       const norme = Math.hypot(dx, dz);
-      const voulue = norme > 0 ? (course ? COURSE : MARCHE) : 0;
+      const voulue = norme > 0 ? (course ? COURSE : MARCHE) * facteur : 0;
       if (norme > 0) {
         dx /= norme;
         dz /= norme;
@@ -81,7 +103,8 @@ export function creerJoueur() {
       etat.x = suivant.x;
       etat.z = suivant.z;
       etat.vitesse = vitesseReelle;
-      if (norme > 0) etat.orientation = angleVers(etat.orientation, Math.atan2(dx, dz), 1 - Math.exp(-dt * 12));
+      if (orientation !== null) etat.orientation = orientation;
+      else if (norme > 0) etat.orientation = angleVers(etat.orientation, Math.atan2(dx, dz), 1 - Math.exp(-dt * 12));
 
       const sol = hauteurSol(etat.x, etat.z);
       if (etat.auSol && saut) {

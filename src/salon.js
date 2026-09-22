@@ -28,7 +28,7 @@ export function membreDepuisMeta(id, meta) {
   const m = meta && typeof meta === 'object' ? meta : {};
   return {
     id: String(id),
-    nom: nettoyerNom(m.nom) || 'Pêcheur',
+    nom: nettoyerNom(m.nom) || 'Joueur',
     apparence: normaliserApparence(m.apparence),
     arrivee: Number.isFinite(m.arrivee) ? m.arrivee : Infinity,
     installe: m.installe === true,

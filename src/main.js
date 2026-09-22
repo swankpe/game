@@ -4,6 +4,7 @@ import { apparenceAleatoire, nettoyerNom, normaliserApparence } from './apparenc
 import { creerAvatars } from './avatars.js';
 import { creerOrbite } from './camera.js';
 import { creerIle } from './ile.js';
+import { creerJeu } from './jeu.js';
 import { creerClavier, creerJoueur } from './joueur.js';
 import { ouvrirPartie } from './partie.js';
 import { animerPersonnage, creerPersonnage, libererPersonnage } from './personnage.js';
@@ -13,10 +14,10 @@ import { construireOptions } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
 
-const CLE_PROFIL = 'peche-entre-potes/profil';
+const CLE_PROFIL = 'le-protege/profil';
 const DELAI_CONNEXION = 10000;
-const INTERVALLE_ENVOI = 100;
-const BATTEMENT_ETAT = 4000;
+const FOV_CREATION = 55;
+const FOV_JEU = 72;
 
 function identifiant() {
   return crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -40,8 +41,6 @@ function enregistrerProfil(p) {
   }
 }
 
-const arrondi = (v, decimales = 2) => Math.round(v * 10 ** decimales) / 10 ** decimales;
-
 // --- Rendu -----------------------------------------------------------------
 
 const canvas = $('scene');
@@ -64,12 +63,17 @@ etiquettes.domElement.className = 'calque-etiquettes';
 canvas.after(etiquettes.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 1200);
+const camera = new THREE.PerspectiveCamera(FOV_CREATION, 1, 0.05, 1200);
 const ile = creerIle(scene);
 const orbite = creerOrbite(camera, canvas);
 const clavier = creerClavier();
 const joueur = creerJoueur();
 const avatars = creerAvatars(scene);
+// partie n'est lue qu'au moment d'envoyer, bien après son initialisation.
+const jeu = creerJeu({
+  scene, camera, canvas, ile, clavier, joueur, avatars,
+  envoyer: (donnees) => partie?.envoyer(donnees),
+});
 
 let profil = chargerProfil();
 let modele = null;
@@ -78,6 +82,7 @@ function habiller() {
   if (modele) libererPersonnage(modele);
   modele = creerPersonnage(profil.apparence);
   scene.add(modele);
+  jeu.definirApparence(profil.apparence);
 }
 habiller();
 
@@ -85,6 +90,7 @@ habiller();
 
 let mode = 'creation'; // 'creation' | 'jeu' | 'edition'
 let partie = null;
+
 let monId = null;
 let codeSalon = null;
 let membres = [];
@@ -189,7 +195,11 @@ if (codeInvitation) {
   $('rejoindre').classList.add('principal');
   $('actions-accueil').prepend($('actions-accueil').querySelector('.rejoindre'));
   $('creer').textContent = 'Créer un autre salon';
-  document.querySelector('.accroche').textContent = `Tu es invité dans le salon ${codeInvitation}. Crée ton pêcheur, puis rejoins-le.`;
+  document.querySelector('.accroche').textContent = `Tu es invité dans le salon ${codeInvitation}. Crée ton perso, puis rejoins-le.`;
+}
+
+if (new URLSearchParams(location.search).has('debug')) {
+  window.leProtege = { ...jeu.debug(), rendu: () => ({ ...rendu.info.render, ...rendu.info.memory }) };
 }
 
 const transport = await choisirTransport();
@@ -252,12 +262,14 @@ function entrer(code) {
           for (const nom of partis) notifier(`${nom} a quitté le salon`);
         }
         dejaSynchronise = true;
+        jeu.surMembres(liste, monId);
         // Un nouveau venu doit voir tout de suite où l'on se trouve.
-        if (arrives.length) envoyerEtat(true);
+        if (arrives.length) jeu.envoyerEtat(true);
         afficherJoueurs();
       },
       surMessage(de, donnees) {
         if (donnees?.type === 'etat') avatars.appliquerEtat(de, donnees);
+        else jeu.surMessage(de, donnees);
       },
       surStatut(statut) {
         $('reseau').hidden = !(statut === 'erreur' && mode !== 'creation');
@@ -272,16 +284,15 @@ function demarrerJeu() {
   $('hud').hidden = false;
   $('code-salon').textContent = codeSalon;
   history.replaceState(null, '', `${location.pathname}?salon=${codeSalon}`);
-  orbite.cadrer({ lacet: joueur.etat.orientation + Math.PI, tangage: 0.32, distance: 5.5 });
   ajusterVue();
   document.activeElement?.blur();
   canvas.focus();
-  envoyerEtat(true);
 }
 
 function retourAccueil() {
   partie?.quitter();
   partie = null;
+  jeu.quitter();
   membres = [];
   avatars.synchroniser([], monId);
   mode = 'creation';
@@ -350,27 +361,6 @@ $('copier').addEventListener('click', async () => {
 
 addEventListener('pagehide', () => partie?.quitter());
 
-// --- Envoi de la position --------------------------------------------------
-
-let dernierEnvoi = -Infinity;
-let dernierEtat = null;
-
-function envoyerEtat(force) {
-  if (partie?.statut !== 'admis') return;
-  const maintenant = performance.now();
-  if (!force && maintenant - dernierEnvoi < INTERVALLE_ENVOI) return;
-  const e = joueur.etat;
-  const orientation = Math.atan2(Math.sin(e.orientation), Math.cos(e.orientation));
-  const etat = { type: 'etat', p: [arrondi(e.x), arrondi(e.y), arrondi(e.z)], r: arrondi(orientation), v: arrondi(e.vitesse, 1) };
-  const inchange =
-    dernierEtat && etat.p.every((v, i) => v === dernierEtat.p[i]) && etat.r === dernierEtat.r && etat.v === dernierEtat.v;
-  // Immobile : un simple rappel de temps en temps suffit.
-  if (!force && inchange && maintenant - dernierEnvoi < BATTEMENT_ETAT) return;
-  partie.envoyer(etat);
-  dernierEnvoi = maintenant;
-  dernierEtat = etat;
-}
-
 // --- Boucle ----------------------------------------------------------------
 
 const horloge = new THREE.Timer();
@@ -389,19 +379,30 @@ rendu.setAnimationLoop((instant) => {
   const dt = Math.min(horloge.getDelta(), 0.1);
   temps += dt;
 
-  joueur.mettreAJour(dt, mode === 'jeu' ? clavier.commandes() : immobile, orbite.reglage.lacet);
+  const fov = mode === 'jeu' ? FOV_JEU : FOV_CREATION;
+  if (camera.fov !== fov) {
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }
+  document.body.classList.toggle('en-jeu', mode === 'jeu');
+
+  // Dans un salon, la partie avance même pendant qu'on retouche son perso.
+  if (partie?.statut === 'admis') jeu.mettreAJour(dt, { enJeu: mode === 'jeu' });
+
+  // À la première personne, son propre perso n'est pas dessiné.
   const e = joueur.etat;
-  modele.position.set(e.x, e.y, e.z);
-  modele.rotation.y = e.orientation;
-  animerPersonnage(modele, dt, { vitesse: e.vitesse, regardFixe: mode !== 'jeu' });
-  avatars.mettreAJour(dt);
-  ile.mettreAJour(temps);
+  modele.visible = mode !== 'jeu';
+  if (mode !== 'jeu') {
+    joueur.mettreAJour(dt, immobile, orbite.reglage.lacet);
+    modele.position.set(e.x, e.y, e.z);
+    modele.rotation.y = e.orientation;
+    animerPersonnage(modele, dt, { vitesse: e.vitesse, regardFixe: true });
+    pointVise.set(e.x, e.y + 1.25, e.z);
+    orbite.mettreAJour(dt, pointVise, premiereImage);
+    premiereImage = false;
+  }
+  ile.mettreAJour(temps, dt);
 
-  pointVise.set(e.x, e.y + (mode === 'jeu' ? 1.5 : 1.25), e.z);
-  orbite.mettreAJour(dt, pointVise, premiereImage);
-  premiereImage = false;
-
-  envoyerEtat(false);
   rendu.render(scene, camera);
   etiquettes.render(scene, camera);
 });

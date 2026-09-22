@@ -417,3 +417,203 @@ button:disabled {
   font-size: 20px;
   background: #cfe7f7;
 }
+
+body.en-jeu #scene {
+  cursor: crosshair;
+}
+
+/* Interface de partie */
+
+.bandeau-partie {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 10px 18px;
+}
+
+.bandeau-partie strong {
+  font-size: 18px;
+}
+
+#chrono {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+#tues {
+  color: var(--encre-douce);
+  font-size: 14px;
+}
+
+.vie {
+  position: fixed;
+  left: 50%;
+  bottom: 56px;
+  transform: translateX(-50%);
+  width: 340px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 10px 16px 12px;
+}
+
+.vie-titre {
+  color: var(--encre-douce);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+#vie-nom {
+  font-weight: 600;
+  justify-self: end;
+}
+
+.jauge {
+  grid-column: 1 / -1;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(31, 36, 51, 0.15);
+  overflow: hidden;
+}
+
+#vie-barre {
+  height: 100%;
+  width: 100%;
+  background: #4c9c4a;
+  transition: width 0.2s linear;
+}
+
+.vie[data-danger='true'] #vie-barre {
+  background: var(--erreur);
+}
+
+.illumination {
+  position: fixed;
+  left: 50%;
+  bottom: 130px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(20, 30, 50, 0.7);
+  color: #ffe2a8;
+  font-weight: 600;
+}
+
+.illumination[data-pret='true'] {
+  background: #f2c230;
+  color: var(--encre);
+}
+
+.lancement {
+  position: fixed;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  text-align: center;
+}
+
+.lancement p {
+  margin: 0;
+}
+
+.choix-role {
+  display: flex;
+  gap: 8px;
+}
+
+.viseur {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.viseur[data-touche='corps'] {
+  background: #ffb13b;
+  transform: scale(1.8);
+}
+
+.viseur[data-touche='tete'] {
+  background: #ff4a2e;
+  transform: scale(2.4);
+}
+
+.indication {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 34px);
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(20, 30, 50, 0.6);
+  color: #fff;
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.annonce {
+  position: fixed;
+  left: 50%;
+  top: 26%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+  animation: apparition 0.3s ease-out;
+}
+
+.annonce strong {
+  font-size: 44px;
+  font-weight: 700;
+}
+
+.annonce span {
+  font-size: 19px;
+}
+
+.reprendre {
+  position: fixed;
+  left: 50%;
+  top: 64%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(20, 30, 50, 0.72);
+  color: #fff;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.degats {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(200, 20, 20, 0.7) 100%);
+}

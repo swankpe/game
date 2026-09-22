@@ -2,7 +2,7 @@
 // palmes, rochers, herbes…) : quelques appels de dessin au lieu de centaines.
 
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { colorer, fusionner, hachage, place } from './geometrie.js';
 import { CABANE, DECOR, PONTON, estHerbe, hauteurTerrain } from './monde.js';
 
 const TEINTES = {
@@ -20,45 +20,6 @@ const TEINTES = {
   toit: '#e6e0d4',
   comptoir: '#8a6a4c',
 };
-
-function hachage(a, b) {
-  const s = Math.sin(a * 91.345 + b * 47.853) * 23421.631;
-  return s - Math.floor(s);
-}
-
-function colorer(geometrie, couleur, variation = 0) {
-  const g = geometrie.index ? geometrie.toNonIndexed() : geometrie;
-  g.deleteAttribute('uv');
-  const n = g.attributes.position.count;
-  const couleurs = new Float32Array(n * 3);
-  const c = new THREE.Color();
-  for (let i = 0; i < n; i += 3) {
-    c.set(couleur).multiplyScalar(1 + (hachage(i, n) - 0.5) * variation);
-    for (let k = 0; k < 3 && i + k < n; k++) couleurs.set([c.r, c.g, c.b], (i + k) * 3);
-  }
-  g.setAttribute('color', new THREE.BufferAttribute(couleurs, 3));
-  return g;
-}
-
-// parties : [géométrie colorée déjà placée]. Une seule matière pour tout.
-function fusionner(parties, { ombre = true, ...options } = {}) {
-  for (const g of parties) if (!g.attributes.normal) g.computeVertexNormals();
-  const geo = mergeGeometries(parties);
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, ...options });
-  const m = new THREE.Mesh(geo, mat);
-  m.castShadow = ombre;
-  m.receiveShadow = true;
-  return m;
-}
-
-function place(geometrie, { x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1 } = {}) {
-  const m = new THREE.Matrix4().compose(
-    new THREE.Vector3(x, y, z),
-    new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)),
-    new THREE.Vector3(sx, sy, sz),
-  );
-  return geometrie.applyMatrix4(m);
-}
 
 function creerCiel() {
   const geo = new THREE.SphereGeometry(600, 24, 12);
@@ -346,12 +307,51 @@ function creerBouees() {
   return bouees;
 }
 
-export function creerIle(scene) {
-  scene.background = new THREE.Color('#cfe7f7');
-  scene.fog = new THREE.Fog('#cfe7f7', 70, 300);
-  scene.add(creerCiel());
+// Trois ambiances : le jour pour créer son perso, la nuit pendant les
+// manches, et l'Illumination du protégé qui éclaire toute la carte.
+const AMBIANCES = {
+  jour: {
+    ciel: '#ffffff', brouillard: '#cfe7f7', pres: 70, loin: 300,
+    hemi: 1.5, hemiCiel: '#e2f2ff', hemiSol: '#e8d7a8',
+    astre: 2.6, astreCouleur: '#fff3dc', etoiles: 0, lune: 0, mer: '#3f95d8',
+  },
+  nuit: {
+    ciel: '#0b1120', brouillard: '#05080f', pres: 4, loin: 40,
+    hemi: 0.12, hemiCiel: '#6f86c9', hemiSol: '#1b1b24',
+    astre: 0.28, astreCouleur: '#9fb6ff', etoiles: 1, lune: 1, mer: '#12304a',
+  },
+  illumination: {
+    ciel: '#3c5580', brouillard: '#2b3b5a', pres: 35, loin: 230,
+    hemi: 1.05, hemiCiel: '#d4e0ff', hemiSol: '#3b3d4a',
+    astre: 1.4, astreCouleur: '#e2ebff', etoiles: 0.3, lune: 0.7, mer: '#2a6aa8',
+  },
+};
 
-  scene.add(new THREE.HemisphereLight('#e2f2ff', '#e8d7a8', 1.5));
+function creerEtoiles() {
+  const positions = [];
+  const alea = (i) => hachage(i, i * 0.37 + 11);
+  for (let i = 0; i < 700; i++) {
+    const theta = alea(i) * Math.PI * 2;
+    const hauteur = 0.08 + alea(i + 999) * 0.92;
+    const r = Math.sqrt(1 - hauteur * hauteur) * 520;
+    positions.push(Math.cos(theta) * r, hauteur * 520, Math.sin(theta) * r);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  return new THREE.Points(geo, new THREE.PointsMaterial({
+    color: '#dfe6ff', size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false,
+  }));
+}
+
+export function creerIle(scene) {
+  scene.fog = new THREE.Fog('#cfe7f7', 70, 300);
+  scene.background = scene.fog.color;
+  const ciel = creerCiel();
+  const etoiles = creerEtoiles();
+  scene.add(ciel, etoiles);
+
+  const hemi = new THREE.HemisphereLight('#e2f2ff', '#e8d7a8', 1.5);
+  scene.add(hemi);
   const soleil = new THREE.DirectionalLight('#fff3dc', 2.6);
   soleil.position.set(28, 42, 18);
   soleil.castShadow = true;
@@ -361,17 +361,63 @@ export function creerIle(scene) {
   soleil.shadow.normalBias = 0.03;
   scene.add(soleil);
 
+  // La lune se lève dans la direction de la lumière : les ombres de la nuit
+  // viennent bien d'elle.
+  const lune = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(14, 1),
+    new THREE.MeshBasicMaterial({ color: '#f4f0dc', fog: false, transparent: true, opacity: 0 }),
+  );
+  lune.position.copy(soleil.position).normalize().multiplyScalar(480);
+  scene.add(lune);
+
   const mer = creerMer();
   const bouees = creerBouees();
   scene.add(creerTerrain(), mer, creerPalmiers(), creerRochers(), creerHerbes(), creerCabane(), creerPonton(), ...bouees);
 
+  let cible = AMBIANCES.jour;
+  const actuelle = { ...AMBIANCES.jour };
+  const couleurs = Object.fromEntries(
+    Object.entries(AMBIANCES.jour).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, new THREE.Color(v)]),
+  );
+  const tampon = new THREE.Color();
+
+  function appliquer() {
+    ciel.material.color.copy(couleurs.ciel);
+    scene.fog.color.copy(couleurs.brouillard);
+    scene.fog.near = actuelle.pres;
+    scene.fog.far = actuelle.loin;
+    hemi.intensity = actuelle.hemi;
+    hemi.color.copy(couleurs.hemiCiel);
+    hemi.groundColor.copy(couleurs.hemiSol);
+    soleil.intensity = actuelle.astre;
+    soleil.color.copy(couleurs.astreCouleur);
+    etoiles.material.opacity = actuelle.etoiles;
+    lune.material.opacity = actuelle.lune;
+    lune.visible = actuelle.lune > 0.01;
+    mer.material.color.copy(couleurs.mer);
+  }
+
   return {
-    mettreAJour(t) {
+    // nom : 'jour' | 'nuit' | 'illumination'. instantane : sans fondu.
+    ambiance(nom, instantane = false) {
+      cible = AMBIANCES[nom] ?? AMBIANCES.jour;
+      if (!instantane) return;
+      Object.assign(actuelle, cible);
+      for (const [k, c] of Object.entries(couleurs)) c.set(cible[k]);
+      appliquer();
+    },
+    mettreAJour(t, dt = 0) {
       mer.userData.animer(t);
       for (const b of bouees) {
         b.position.y = Math.sin(t * 1.3 + b.userData.phase) * 0.12;
         b.rotation.z = Math.sin(t * 0.9 + b.userData.phase) * 0.12;
       }
+      const f = 1 - Math.exp(-dt * 2.2);
+      for (const [k, v] of Object.entries(cible)) {
+        if (typeof v === 'number') actuelle[k] += (v - actuelle[k]) * f;
+        else couleurs[k].lerp(tampon.set(v), f);
+      }
+      appliquer();
     },
   };
 }

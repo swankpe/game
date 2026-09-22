@@ -160,9 +160,29 @@ function creerBras(cote, mats) {
   const pivot = new THREE.Group();
   pivot.position.set(cote * 0.28, 1.47, 0);
   pivot.rotation.z = cote * 0.12;
+  pivot.userData.cote = cote;
   pivot.add(maillage(new THREE.CylinderGeometry(0.075, 0.068, 0.52, 6), mats.haut, 0, -0.26, 0));
   pivot.add(maillage(new THREE.IcosahedronGeometry(0.08, 0), mats.peau, 0, -0.57, 0));
   return pivot;
+}
+
+// Pistolet low-poly, canon vers +z, crosse vers le bas. La bouche du canon
+// est en BOUCHE_PISTOLET, pour placer l'éclair du tir.
+export const BOUCHE_PISTOLET = new THREE.Vector3(0, 0.035, 0.21);
+
+export function creerPistolet() {
+  const metal = new THREE.MeshStandardMaterial({ color: '#2b2e35', flatShading: true, roughness: 0.45, metalness: 0.4 });
+  const crosse = new THREE.MeshStandardMaterial({ color: '#1c1d21', flatShading: true, roughness: 0.8 });
+  const pistolet = new THREE.Group();
+  pistolet.add(maillage(new THREE.BoxGeometry(0.05, 0.06, 0.24), metal, 0, 0.03, 0.07));
+  const poignee = maillage(new THREE.BoxGeometry(0.045, 0.13, 0.07), crosse, 0, -0.05, -0.02);
+  poignee.rotation.x = 0.25;
+  pistolet.add(poignee);
+  const canon = maillage(new THREE.CylinderGeometry(0.014, 0.014, 0.03, 6), crosse, 0, 0.035, 0.195);
+  canon.rotation.x = Math.PI / 2;
+  pistolet.add(canon);
+  pistolet.add(maillage(new THREE.BoxGeometry(0.012, 0.04, 0.05), crosse, 0, -0.015, 0.04));
+  return pistolet;
 }
 
 export function creerPersonnage(apparenceBrute) {
@@ -189,6 +209,13 @@ export function creerPersonnage(apparenceBrute) {
   const brasG = creerBras(1, mats), brasD = creerBras(-1, mats);
   corps.add(jambeG, jambeD, brasG, brasD);
 
+  // Dans la main droite, canon dans le prolongement du bras.
+  const pistolet = creerPistolet();
+  pistolet.position.set(0, -0.6, 0.02);
+  pistolet.rotation.x = Math.PI / 2;
+  pistolet.visible = false;
+  brasD.add(pistolet);
+
   corps.add(maillage(new THREE.CylinderGeometry(0.24, 0.235, 0.32, 7), mats.salopette, 0, 0.99, 0));
   corps.add(maillage(new THREE.CylinderGeometry(0.2, 0.235, 0.52, 7), mats.haut, 0, 1.29, 0));
   corps.add(maillage(new THREE.BoxGeometry(0.3, 0.3, 0.08), mats.salopette, 0, 1.26, 0.19));
@@ -208,7 +235,7 @@ export function creerPersonnage(apparenceBrute) {
     if (o.isMesh) o.castShadow = true;
   });
   racine.userData = {
-    parties: { corps, tete, jambeG, jambeD, brasG, brasD, yeux },
+    parties: { corps, tete, jambeG, jambeD, brasG, brasD, yeux, pistolet },
     sommet,
     anim: { phase: 0, intensite: 0, regard: [0, 0], cible: [0, 0], prochainRegard: 0, clignement: 0, prochainClignement: 2, temps: 0 },
   };
@@ -225,22 +252,40 @@ export function libererPersonnage(racine) {
   });
 }
 
+// Position des bras [rotation x, rotation z vers l'extérieur] selon la pose.
+// Le balancement de la marche s'y ajoute, sauf pour le protégé ligoté.
+const POSES = {
+  libre: { g: [0, 0.12], d: [0, 0.12], balance: 0.9 },
+  arme: { g: [-1.3, -0.45], d: [-1.5, 0.02], balance: 0.08 },
+  porte: { g: [-1.25, -0.2], d: [-1.25, -0.2], balance: 0.1 },
+  attache: { g: [0.55, -0.12], d: [0.55, -0.12], balance: 0 },
+};
+
 // vitesse en m/s ; regardFixe : les yeux fixent l'avant (écran de création).
-export function animerPersonnage(racine, dt, { vitesse = 0, regardFixe = false } = {}) {
+// pose : 'libre' | 'arme' (pistolet en main) | 'porte' (porte le poteau) | 'attache'.
+export function animerPersonnage(racine, dt, { vitesse = 0, regardFixe = false, pose = 'libre' } = {}) {
   const { parties: p, anim: e } = racine.userData;
+  const reglage = POSES[pose] ?? POSES.libre;
   e.temps += dt;
-  const cible = Math.min(vitesse / 4.2, 1.5);
+  const cible = pose === 'attache' ? 0 : Math.min(vitesse / 4.2, 1.5);
   e.intensite += (cible - e.intensite) * (1 - Math.exp(-dt * 10));
   e.phase += dt * (3 + vitesse * 1.9);
 
   const pas = Math.sin(e.phase) * 0.55 * Math.min(e.intensite, 1.2);
+  const souple = 1 - Math.exp(-dt * 14);
   p.jambeG.rotation.x = pas;
   p.jambeD.rotation.x = -pas;
-  p.brasG.rotation.x = -pas * 0.9;
-  p.brasD.rotation.x = pas * 0.9;
+  for (const [bras, [rx, rz], signe] of [[p.brasG, reglage.g, -1], [p.brasD, reglage.d, 1]]) {
+    const cibleX = rx + signe * pas * reglage.balance;
+    bras.rotation.x += (cibleX - bras.rotation.x) * souple;
+    bras.rotation.z += (bras.userData.cote * rz - bras.rotation.z) * souple;
+  }
+  p.pistolet.visible = pose === 'arme';
   const respiration = Math.sin(e.temps * 2.2) * 0.008;
   p.corps.position.y = Math.abs(Math.cos(e.phase)) * 0.05 * e.intensite + respiration;
   p.tete.rotation.z = Math.sin(e.phase) * 0.04 * e.intensite;
+  // Ligoté, on se débat un peu.
+  p.corps.rotation.z = pose === 'attache' ? Math.sin(e.temps * 1.7) * 0.035 : 0;
 
   // Regard : coups d'œil au hasard, et pupilles qui ballottent en marchant.
   if (regardFixe) {

@@ -57,7 +57,11 @@ canaux privés dans les réglages du projet, rouvre l'accès public.
    | `VITE_SUPABASE_URL` | `https://xxxx.supabase.co` |
    | `VITE_SUPABASE_ANON_KEY` | la clé publique |
 
-3. Redéploie : les variables `VITE_` sont intégrées au moment du build, une
+3. Dans *Settings → Deployment Protection → Vercel Authentication*, choisis
+   **Standard Protection** : l'adresse de production reste publique, seuls les
+   aperçus demandent un compte Vercel. Avec « All Deployments », tes amis
+   tomberaient sur une page de connexion Vercel.
+4. Redéploie : les variables `VITE_` sont intégrées au moment du build, une
    variable ajoutée après coup n'est prise en compte qu'au déploiement suivant.
 
 Pour jouer en ligne depuis ton poste, copie `.env.example` en `.env.local` et

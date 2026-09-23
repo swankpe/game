@@ -1,14 +1,16 @@
 // La partie telle que la fait tourner l'hôte : manches, zombies, boss de fin
-// de manche, vie du protégé, poteau, Illumination. Aucun Three.js ni réseau :
+// de manche, vie du protégé et des défenseurs, poteau, lanterne, étoiles,
+// Illumination. Aucun Three.js ni réseau :
 // l'hôte appelle pas() à chaque image et diffuse instantane() ; si l'hôte
 // s'en va, le suivant reprend avec charger(dernier instantané reçu).
 
 import { BOUTIQUE, estPraticable, rayonIle, resoudreCollisions } from './monde.js';
 import {
-  ARMES, ARMES_DEPART, BONUS_MANCHE, BOSS, DEGATS_MONSTRE, DISTANCE_BOUTIQUE, DISTANCE_PORTER, DUREE_DEFAITE,
-  DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE, EXPLOSION_BOUFFI, MONSTRES_MAX, PORTEE_ATTAQUE, POTEAU_DEPART,
-  PV_PROTEGE, RAYON_MONSTRE, RECHARGE_ILLUMINATION, TYPES_ZOMBIES, degatsExplosion, indiceArme, monstresParMinute,
-  poidsTypes, positionPortee, pvBoss, pvMonstre, renfortsBoss, tirerProtege, tirerType, vitesseMonstre,
+  ARMES, ARMES_DEPART, BONUS_DEGATS_MAX, BONUS_MANCHE, BOSS, DEGATS_MONSTRE, DISTANCE_BOUTIQUE, DISTANCE_PORTER,
+  DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE, ETOILES, EXPLOSION_BOUFFI, JOUEUR, LANTERNE,
+  MONSTRES_MAX, NIVEAU_LANTERNE_MAX, PORTEE_ATTAQUE, POTEAU_DEPART, PV_PROTEGE, RAYON_MONSTRE, RECHARGE_ILLUMINATION,
+  TYPES_ZOMBIES, degatsExplosion, indiceArme, monstresParMinute, poidsTypes, positionPortee, pvBoss, pvMonstre,
+  renfortsBoss, tirerProtege, tirerType, vitesseMonstre,
 } from './regles.js';
 
 export const PHASES = ['attente', 'manche', 'pause', 'defaite'];
@@ -40,21 +42,42 @@ function etatInitial() {
     prochaineExplosion: 1,
     // Boss de fin de manche : { id, pvMax, cris, invocation, enrage }, ou null.
     boss: null,
-    // Argent et armes de chaque joueur : { id: { argent, armes } }.
+    // Argent, armes et niveau d'amélioration de chaque arme, par joueur :
+    // { id: { argent, armes, niveaux: [n, n, n, n] } }.
     comptes: {},
+    // Niveau de la lanterne (0 à NIVEAU_LANTERNE_MAX), pour toute la partie.
+    lanterne: 0,
+    // Étoiles au sol : { id, x, z, age }.
+    etoiles: [],
+    prochaineEtoile: 1,
+    // Défenseurs touchés ou à terre : { id: { coups, terre, releve, repit, calme, seul } }.
+    vies: {},
+    // Qui relève qui (E maintenu) : { releveur: cible }.
+    releves: {},
   };
 }
 
-// Plafond de dégâts par coup reçu du réseau : une grenade au centre.
-const DEGATS_MAX = Math.max(...ARMES.map((a) => a.degats * 2));
+// Plafond de dégâts par coup reçu du réseau : une grenade au centre, arme au
+// plus haut niveau.
+const DEGATS_MAX = Math.max(...ARMES.map((a) => a.degats * 2)) * BONUS_DEGATS_MAX;
+const niveauxVides = () => ARMES.map(() => 0);
 
 // apparitionBoss : secondes de manche avant le boss (BOSS.apparition par défaut).
 export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS.apparition } = {}) {
   let s = etatInitial();
   let membres = [];
   let roleSolo = 'defenseur';
+  // Positions reçues au dernier pas (les explosions de bouffis, déclenchées
+  // hors du pas par un tir, en ont besoin pour toucher les joueurs).
+  let joueursConnus = new Map();
 
-  const compte = (id) => (s.comptes[id] ??= { argent: 0, armes: ARMES_DEPART });
+  const compte = (id) => (s.comptes[id] ??= { argent: 0, armes: ARMES_DEPART, niveaux: niveauxVides() });
+  const vie = (id) => (s.vies[id] ??= { coups: 0, terre: false, releve: 0, repit: 0, calme: 0, seul: 0 });
+  const estMembre = (id) => membres.some((j) => j.id === id);
+  // Défenseurs debout, présents sur l'île : les cibles des zombies.
+  const defenseursDebout = () => [...joueursConnus]
+    .filter(([id]) => id !== s.protege && estMembre(id) && !s.vies[id]?.terre)
+    .map(([id, j]) => ({ id, ...j }));
 
   // Point de sortie de l'eau, du côté opposé au poteau de préférence : le
   // plus loin parmi quelques essais, ou le premier assez loin. large : plus
@@ -128,6 +151,9 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
     s.reste = DUREE_PAUSE;
     s.monstres = [];
     s.boss = null;
+    // Tout le monde se relève pour la manche suivante.
+    s.vies = {};
+    s.releves = {};
     s.manche += 1;
     for (const m of membres) compte(m.id).argent += BONUS_MANCHE;
     s.protege = tirerProtege(membres, { aleatoire, roleSolo, precedent: s.precedent });
@@ -145,7 +171,83 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
     s.tues += 1;
     const type = typeDe(m);
     if (auteur && membres.some((j) => j.id === auteur)) compte(auteur).argent += type.recompense;
+    if (type.boss) {
+      for (let i = 0; i < ETOILES.boss; i++) {
+        const a = (i / ETOILES.boss) * Math.PI * 2;
+        poserEtoile(m.x + Math.cos(a) * 2, m.z + Math.sin(a) * 2);
+      }
+    } else if (aleatoire() < (type.etoile ?? 0)) {
+      poserEtoile(m.x, m.z);
+    }
     if (type.explosif) exploser(m, auteur, false);
+  }
+
+  // Une étoile tombe là où le zombie est mort ; s'il est mort dans l'eau
+  // profonde, elle glisse vers le poteau jusqu'à la terre ferme.
+  function poserEtoile(x, z) {
+    let p = null;
+    for (let t = 0; t <= 1 && !p; t += 0.05) {
+      const px = x + (s.poteau.x - x) * t, pz = z + (s.poteau.z - z) * t;
+      if (estPraticable(px, pz)) p = resoudreCollisions(px, pz);
+    }
+    if (!p) return;
+    s.etoiles.push({ id: s.prochaineEtoile++, x: p.x, z: p.z, age: 0 });
+    if (s.etoiles.length > ETOILES.max) s.etoiles.shift();
+  }
+
+  // Étoile ramassée : l'arme en main monte d'un niveau ; déjà au plus haut,
+  // une autre des siennes ; toutes au plus haut, une prime.
+  function ramasser(id, indiceEnMain) {
+    const c = compte(id);
+    c.niveaux ??= niveauxVides();
+    const possede = (i) => (c.armes & (1 << i)) !== 0;
+    const ameliorable = (i) => possede(i) && c.niveaux[i] < ETOILES.niveauMax;
+    const i = ameliorable(indiceEnMain) ? indiceEnMain : ARMES.findIndex((_, k) => ameliorable(k));
+    if (i >= 0) c.niveaux[i] += 1;
+    else c.argent += ETOILES.prime;
+  }
+
+  // Un coup porté à un défenseur ; au bout de JOUEUR.coups, il est à terre.
+  function frapperJoueur(id, n = 1) {
+    const v = vie(id);
+    if (v.terre || v.repit > 0) return;
+    v.coups = Math.min(JOUEUR.coups, v.coups + n);
+    v.repit = JOUEUR.repit;
+    v.calme = 0;
+    if (v.coups >= JOUEUR.coups) {
+      v.terre = true;
+      v.releve = 0;
+      v.seul = 0;
+      if (s.poteau.porteur === id) s.poteau.porteur = null;
+      delete s.releves[id];
+    }
+  }
+
+  function relever(id) {
+    s.vies[id] = { coups: 0, terre: false, releve: 0, repit: 2, calme: 0, seul: 0 };
+    for (const [r, c] of Object.entries(s.releves)) if (c === id) delete s.releves[r];
+  }
+
+  // Blessures qui guérissent, relève par un allié (ou seul, faute d'allié).
+  function suivreVies(dt) {
+    const debout = defenseursDebout();
+    for (const [id, v] of Object.entries(s.vies)) {
+      v.repit = Math.max(0, v.repit - dt);
+      if (!v.terre) {
+        if (v.coups > 0 && (v.calme += dt) >= JOUEUR.soin) {
+          v.coups -= 1;
+          v.calme = 0;
+        }
+        continue;
+      }
+      const ici = joueursConnus.get(id);
+      const aide = ici && debout.some((j) => s.releves[j.id] === id && Math.hypot(j.x - ici.x, j.z - ici.z) <= JOUEUR.distanceReleve);
+      v.releve = aide ? v.releve + dt / JOUEUR.dureeReleve : Math.max(0, v.releve - dt / JOUEUR.dureeReleve);
+      // Aucun autre défenseur dans la partie : personne ne viendra.
+      const allies = membres.filter((m) => m.id !== id && m.id !== s.protege).length;
+      if (!allies) v.seul += dt;
+      if (v.releve >= 1 || v.seul >= JOUEUR.releveSeul) relever(id);
+    }
   }
 
   function blesser(m, degats, auteur) {
@@ -169,6 +271,10 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
     if (s.phase === 'manche') {
       const d = contact ? 0 : Math.hypot(m.x - s.poteau.x, m.z - s.poteau.z);
       s.pv -= degatsExplosion(E, d, E.protege);
+      // Les défenseurs trop près prennent un coup.
+      for (const j of defenseursDebout()) {
+        if (Math.hypot(j.x - m.x, j.z - m.z) <= JOUEUR.explosion) frapperJoueur(j.id, 1);
+      }
     }
     // Les zombies autour, parfois d'autres bouffis : réaction en chaîne.
     for (const autre of [...s.monstres]) {
@@ -184,17 +290,39 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
     s.pv = PV_PROTEGE;
     s.monstres = [];
     s.boss = null;
+    s.vies = {};
+    s.releves = {};
     // Un premier zombie arrive vite, pour que la manche démarre vraiment.
     s.cumul = 0.7;
   }
 
   function avancerMonstres(dt) {
     const vitesse = vitesseMonstre(s.manche);
-    const { x: px, z: pz } = s.poteau;
     const auContact = [];
+    const cibles = defenseursDebout();
     for (const m of s.monstres) {
       const type = typeDe(m);
       const portee = PORTEE_ATTAQUE + RAYON_MONSTRE * (type.largeur - 1);
+      // Cible : le poteau, ou un défenseur proche (plus proche que le poteau).
+      let px = s.poteau.x, pz = s.poteau.z;
+      let proie = null;
+      let dCible = Math.hypot(px - m.x, pz - m.z);
+      for (const j of cibles) {
+        const dj = Math.hypot(j.x - m.x, j.z - m.z);
+        if (dj < JOUEUR.aggro && dj < dCible) {
+          proie = j;
+          dCible = dj;
+        }
+      }
+      if (proie) {
+        px = proie.x;
+        pz = proie.z;
+      }
+      if (m.j !== (proie?.id ?? null)) {
+        // Nouvelle cible : un temps d'élan avant le premier coup.
+        m.j = proie?.id ?? null;
+        m.t = 0.4;
+      }
       const dx = px - m.x, dz = pz - m.z;
       const d = Math.hypot(dx, dz);
       m.r = Math.atan2(dx, dz);
@@ -212,18 +340,26 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
         m.z = suivant.z;
         m.a = false;
       } else if (type.explosif) {
-        auContact.push(m);
+        auContact.push({ m, poteau: !proie });
+      } else if (proie) {
+        m.a = true;
+        m.t = (m.t ?? 0) - dt;
+        if (m.t <= 0) {
+          frapperJoueur(proie.id, type.coups ?? 1);
+          m.t = JOUEUR.cadence * (type.cadence ?? 1);
+        }
       } else {
         m.a = true;
         s.pv -= DEGATS_MONSTRE * type.degats * dt;
       }
     }
-    // Un bouffi au contact explose : personne n'est crédité.
-    for (const m of auContact) {
+    // Un bouffi au contact (du poteau ou d'un joueur) explose : personne
+    // n'est crédité.
+    for (const { m, poteau } of auContact) {
       const i = s.monstres.indexOf(m);
       if (i < 0) continue;
       s.monstres.splice(i, 1);
-      exploser(m, null, true);
+      exploser(m, null, poteau);
     }
     // Les zombies se bousculent au lieu de s'empiler au même endroit ; un
     // colosse pousse les autres plus qu'il n'est poussé.
@@ -279,11 +415,12 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
 
     demarrer() {
       if (s.phase !== 'attente') return false;
-      const { poteau, prochaineExplosion } = s;
+      const { poteau, prochaineExplosion, prochaineEtoile } = s;
       s = etatInitial();
       s.poteau = { ...poteau, porteur: null };
       // Les numéros d'explosion continuent : les autres ont gardé les anciens.
       s.prochaineExplosion = prochaineExplosion;
+      s.prochaineEtoile = prochaineEtoile;
       s.manche = 1;
       s.protege = tirerProtege(membres, { aleatoire, roleSolo });
       s.precedent = s.protege;
@@ -291,10 +428,23 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       return true;
     },
 
-    // joueurs : Map id → { x, z, r } (r = orientation du corps).
+    // joueurs : Map id → { x, z, r, ar } (r = orientation du corps, ar =
+    // indice de l'arme en main).
     pas(dt, joueurs) {
+      joueursConnus = joueurs;
       if (s.protege && s.poteau.porteur === s.protege) s.poteau.porteur = null;
       suivrePorteur(joueurs);
+      // Étoiles : elles s'éteignent avec le temps ; on les ramasse en marchant dessus.
+      for (const e of s.etoiles) e.age += dt;
+      s.etoiles = s.etoiles.filter((e) => e.age < ETOILES.duree);
+      if (s.phase === 'manche' || s.phase === 'pause') {
+        for (const j of defenseursDebout()) {
+          const e = s.etoiles.find((x) => Math.hypot(x.x - j.x, x.z - j.z) <= ETOILES.rayon);
+          if (!e) continue;
+          s.etoiles.splice(s.etoiles.indexOf(e), 1);
+          ramasser(j.id, Number.isInteger(j.ar) ? j.ar : 0);
+        }
+      }
       s.illumination = Math.max(0, s.illumination - dt);
       s.recharge = Math.max(0, s.recharge - dt);
       for (const e of s.explosions) e.age += dt;
@@ -310,6 +460,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
           s.cumul -= 1;
           if (s.monstres.length < MONSTRES_MAX) apparaitre();
         }
+        suivreVies(dt);
         const boss = bossEnJeu();
         if (boss) {
           s.boss.invocation -= dt;
@@ -324,6 +475,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
           s.phase = 'defaite';
           s.reste = DUREE_DEFAITE;
           s.poteau.porteur = null;
+          s.releves = {};
         } else if (!s.boss && DUREE_MANCHE - s.reste >= apparitionBoss) {
           // L'heure du boss : il sort de la mer ; sa mort gagne la manche.
           appelerBoss();
@@ -336,10 +488,11 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       } else if (s.phase === 'defaite') {
         s.reste -= dt;
         if (s.reste <= 0) {
-          const { poteau, comptes, prochaineExplosion } = s;
+          const { poteau, comptes, prochaineExplosion, prochaineEtoile } = s;
           s = etatInitial();
           s.poteau = poteau;
           s.prochaineExplosion = prochaineExplosion;
+          s.prochaineEtoile = prochaineEtoile;
           // On garde ses économies au camp ; elles repartent à zéro au lancement.
           s.comptes = comptes;
         }
@@ -367,8 +520,33 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       return true;
     },
 
+    // Amélioration de la lanterne, payée par un défenseur pour toute l'équipe.
+    ameliorerLanterne(id, joueurs) {
+      if (!estMembre(id) || id === s.protege || s.lanterne >= NIVEAU_LANTERNE_MAX) return false;
+      const j = joueurs.get(id);
+      if (!j || Math.hypot(j.x - BOUTIQUE.x, j.z - BOUTIQUE.z) > DISTANCE_BOUTIQUE) return false;
+      const c = compte(id);
+      const prix = LANTERNE.prix[s.lanterne];
+      if (c.argent < prix) return false;
+      c.argent -= prix;
+      s.lanterne += 1;
+      return true;
+    },
+
+    // releveur maintient E près de cible (à terre) ; cible null : il lâche.
+    demanderRelever(releveur, cible) {
+      if (cible === null || cible === undefined) {
+        delete s.releves[releveur];
+        return true;
+      }
+      if (!estMembre(releveur) || releveur === s.protege || s.vies[releveur]?.terre) return false;
+      if (typeof cible !== 'string' || !s.vies[cible]?.terre) return false;
+      s.releves[releveur] = cible;
+      return true;
+    },
+
     demanderPorter(id, joueurs) {
-      if (s.poteau.porteur || id === s.protege || s.phase === 'defaite') return false;
+      if (s.poteau.porteur || id === s.protege || s.phase === 'defaite' || s.vies[id]?.terre) return false;
       const j = joueurs.get(id);
       if (!j || Math.hypot(j.x - s.poteau.x, j.z - s.poteau.z) > DISTANCE_PORTER) return false;
       s.poteau.porteur = id;
@@ -399,10 +577,16 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
         po: [arrondi(s.poteau.x), arrondi(s.poteau.z), s.poteau.porteur],
         il: [arrondi(s.illumination, 1), arrondi(s.recharge, 1)],
         tu: s.tues,
-        jo: Object.fromEntries(Object.entries(s.comptes).map(([id, c]) => [id, [c.argent, c.armes]])),
+        jo: Object.fromEntries(Object.entries(s.comptes).map(([id, c]) => [id, [c.argent, c.armes, c.niveaux ?? niveauxVides()]])),
         m: s.monstres.map((m) => [m.id, arrondi(m.x), arrondi(m.z), arrondi(m.r), m.a ? 1 : 0, arrondi(m.pv, 1), arrondi(m.v), m.k ?? 0]),
         ex: s.explosions.map((e) => [e.id, arrondi(e.x), arrondi(e.z)]),
         bo: s.boss ? [s.boss.id, s.boss.pvMax, s.boss.cris] : null,
+        la: s.lanterne,
+        et: s.etoiles.map((e) => [e.id, arrondi(e.x), arrondi(e.z), arrondi(e.age, 1)]),
+        // Relève : la plus avancée des deux (par un allié, ou seul).
+        vi: Object.fromEntries(Object.entries(s.vies).map(([id, v]) => [
+          id, [v.coups, v.terre ? 1 : 0, arrondi(Math.max(v.releve, v.seul / JOUEUR.releveSeul))],
+        ])),
       };
     },
 
@@ -428,6 +612,11 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
         explosions: i.explosions.map((e) => ({ ...e, age: 0 })),
         prochaineExplosion: i.explosions.reduce((max, e) => Math.max(max, e.id), 0) + 1,
       };
+      s.lanterne = i.lanterne;
+      s.etoiles = i.etoiles.map((e) => ({ ...e }));
+      s.prochaineEtoile = i.etoiles.reduce((max, e) => Math.max(max, e.id), 0) + 1;
+      // Les blessures reprennent ; une relève en cours repart de zéro.
+      s.vies = Object.fromEntries(Object.entries(i.vies).map(([id, v]) => [id, { coups: v.coups, terre: v.terre, releve: 0, repit: 0, calme: 0, seul: 0 }]));
       if (i.boss) {
         const boss = s.monstres.find((m) => m.id === i.boss.id);
         s.boss = { ...i.boss, invocation: BOSS.invocation, enrage: !!boss && boss.pv <= i.boss.pvMax * BOSS.enrage };
@@ -460,6 +649,17 @@ export function normaliserMonde(inst) {
     .slice(0, EXPLOSIONS_MAX)
     .filter((e) => Array.isArray(e) && Number.isInteger(e[0]) && [e[1], e[2]].every(Number.isFinite))
     .map(([id, x, z]) => ({ id, x, z }));
+  const etoiles = (Array.isArray(inst.et) ? inst.et : [])
+    .slice(0, ETOILES.max)
+    .filter((e) => Array.isArray(e) && Number.isInteger(e[0]) && [e[1], e[2]].every(Number.isFinite))
+    .map(([id, x, z, age]) => ({ id, x, z, age: Math.min(Math.max(fini(age), 0), ETOILES.duree) }));
+  const vies = {};
+  if (inst.vi && typeof inst.vi === 'object') {
+    for (const [id, v] of Object.entries(inst.vi).slice(0, 8)) {
+      if (id.length > 64 || !Array.isArray(v) || !Number.isInteger(v[0])) continue;
+      vies[id] = { coups: Math.min(Math.max(v[0], 0), JOUEUR.coups), terre: v[1] === 1, releve: Math.min(Math.max(fini(v[2]), 0), 1) };
+    }
+  }
   const bo = inst.bo;
   const boss = Array.isArray(bo) && Number.isInteger(bo[0]) && Number.isFinite(bo[1]) && bo[1] > 0 && Number.isInteger(bo[2]) && bo[2] >= 0
     ? { id: bo[0], pvMax: bo[1], cris: bo[2] }
@@ -478,6 +678,9 @@ export function normaliserMonde(inst) {
     monstres,
     explosions,
     boss,
+    lanterne: Number.isInteger(inst.la) ? Math.min(Math.max(inst.la, 0), NIVEAU_LANTERNE_MAX) : 0,
+    etoiles,
+    vies,
   };
 }
 
@@ -486,9 +689,16 @@ function normaliserComptes(jo) {
   if (!jo || typeof jo !== 'object') return comptes;
   for (const [id, v] of Object.entries(jo).slice(0, 8)) {
     if (id.length > 64 || !Array.isArray(v)) continue;
-    const [argent, armes] = v;
+    const [argent, armes, niveaux] = v;
     if (!Number.isInteger(argent) || argent < 0 || !Number.isInteger(armes)) continue;
-    comptes[id] = { argent, armes: (armes & ((1 << ARMES.length) - 1)) | ARMES_DEPART };
+    comptes[id] = {
+      argent,
+      armes: (armes & ((1 << ARMES.length) - 1)) | ARMES_DEPART,
+      niveaux: ARMES.map((_, i) => {
+        const n = Array.isArray(niveaux) ? niveaux[i] : 0;
+        return Number.isInteger(n) ? Math.min(Math.max(n, 0), ETOILES.niveauMax) : 0;
+      }),
+    };
   }
   return comptes;
 }

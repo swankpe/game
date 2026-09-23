@@ -14,13 +14,24 @@ lien.
   davantage, plus rapides et plus résistants. Au bout des 5 minutes, **le boss**
   sort de la mer : l'abattre gagne la manche. Si le protégé meurt, c'est la
   défaite et tout le monde retourne au camp.
-- **La nuit**, on ne voit bien que ce qu'éclaire la lanterne du protégé.
+- **La nuit est noire** : au-delà de quelques mètres, on ne voit que ce
+  qu'éclaire la lanterne du protégé (et les yeux des zombies qui luisent).
 - **Le protégé** ne bouge pas : il dirige la lanterne avec la souris.
   **F** lance l'**Illumination** : toute l'île éclairée pendant 30 secondes,
   puis 3 minutes de recharge.
 - **Les défenseurs** tirent et peuvent **porter le poteau** (**E**) pour le
   déplacer, avec le protégé dessus. En portant, on ne tire pas et on avance
   moins vite.
+- **Les zombies attaquent aussi les défenseurs** : celui qui passe à moins de
+  6 m d'un joueur (et plus près de lui que du poteau) se jette dessus. **Deux
+  coups et on est à terre** (un seul pour le boss ; un bouffi qui éclate tout
+  près en donne un). Un coup s'efface après 12 secondes sans être touché ;
+  les deux cœurs en bas à gauche montrent où tu en es.
+- **À terre**, on ne bouge plus et on ne tire plus. Un allié te **relève** en
+  restant près de toi, **E maintenu**, pendant 3 secondes. Sans autre
+  défenseur dans la partie (seul, ou à deux avec le protégé), on se relève
+  tout seul au bout de 15 secondes. Tout le monde est relevé à la fin de la
+  manche.
 
 ### Les zombies
 
@@ -55,6 +66,17 @@ s'affiche en haut de l'écran.
 - L'abattre rapporte **250 $** au tireur, en plus des 150 $ de la manche pour
   tout le monde.
 
+### Étoiles
+
+Un zombie abattu lâche parfois une **étoile** dorée (4 % pour un rôdeur,
+35 % pour un colosse ; le boss en lâche trois). Elle se voit de loin, même
+de nuit. **Marche dessus** pour la ramasser : l'arme que tu tiens gagne un
+niveau (★ à ★★★), soit +25 % de dégâts, +20 % de chargeur et un
+rechargement plus rapide, et son chargeur se remplit. Arme déjà au plus
+haut : l'étoile améliore une autre de tes armes, ou rapporte 100 $. Une
+étoile s'éteint au bout de 30 secondes (elle clignote avant). Les niveaux
+repartent à zéro à chaque nouvelle partie.
+
 ### Argent et armurerie
 
 Chaque zombie tué rapporte sa prime (de 10 à 60 $) à celui qui l'a abattu,
@@ -71,6 +93,11 @@ quelques instants.
 | Mini Uzi | 250 $ | 32 (1,6 s) | rafale très rapide, qui s'écarte et grimpe |
 | Fusil d'assaut | 600 $ | 30 (2 s) | puissant et précis au coup par coup |
 | Lance-grenades | 1 200 $ | 6 (2,8 s) | explose au contact, dégâts de zone |
+
+L'armurerie vend aussi la **lanterne du protégé**, pour toute l'équipe :
+trois niveaux (300, 600 puis 1 000 $), chacun rend le faisceau plus long,
+plus large et plus fort, et repousse la nuit (on voit à 22 m au départ,
+44 m au niveau 3).
 
 Munitions illimitées, mais il faut **recharger** : **R**, ou tout seul quand le
 chargeur est vide. Changer d'arme interrompt le rechargement ; chaque manche
@@ -103,6 +130,7 @@ la lanterne et l'Illumination.
 | R | recharger |
 | 1 à 4, molette | changer d'arme |
 | E | porter / poser le poteau, ouvrir l'armurerie |
+| E maintenu | relever un allié à terre |
 | F | Illumination (protégé) |
 | Maj | courir |
 | Espace | sauter |

@@ -253,15 +253,17 @@ const POSES = {
   arme: { g: [-1.3, -0.45], d: [-1.5, 0.02], balance: 0.08 },
   porte: { g: [-1.25, -0.2], d: [-1.25, -0.2], balance: 0.1 },
   attache: { g: [0.55, -0.12], d: [0.55, -0.12], balance: 0 },
+  terre: { g: [-0.3, 1.1], d: [-0.4, 0.9], balance: 0 },
 };
 
 // vitesse en m/s ; regardFixe : les yeux fixent l'avant (écran de création).
-// pose : 'libre' | 'arme' (pistolet en main) | 'porte' (porte le poteau) | 'attache'.
+// pose : 'libre' | 'arme' (pistolet en main) | 'porte' (porte le poteau) |
+// 'attache' | 'terre' (à terre, sur le dos, en attendant qu'on le relève).
 export function animerPersonnage(racine, dt, { vitesse = 0, regardFixe = false, pose = 'libre' } = {}) {
   const { parties: p, anim: e } = racine.userData;
   const reglage = POSES[pose] ?? POSES.libre;
   e.temps += dt;
-  const cible = pose === 'attache' ? 0 : Math.min(vitesse / 4.2, 1.5);
+  const cible = pose === 'attache' || pose === 'terre' ? 0 : Math.min(vitesse / 4.2, 1.5);
   e.intensite += (cible - e.intensite) * (1 - Math.exp(-dt * 10));
   e.phase += dt * (3 + vitesse * 1.9);
 
@@ -280,6 +282,10 @@ export function animerPersonnage(racine, dt, { vitesse = 0, regardFixe = false, 
   p.tete.rotation.z = Math.sin(e.phase) * 0.04 * e.intensite;
   // Ligoté, on se débat un peu.
   p.corps.rotation.z = pose === 'attache' ? Math.sin(e.temps * 1.7) * 0.035 : 0;
+  // À terre : le corps bascule sur le dos, pieds en avant.
+  e.chute = (e.chute ?? 0) + ((pose === 'terre' ? 1 : 0) - (e.chute ?? 0)) * (1 - Math.exp(-dt * 7));
+  p.corps.rotation.x = -e.chute * Math.PI * 0.47;
+  p.corps.position.y += e.chute * 0.22;
 
   // Regard : coups d'œil au hasard, et pupilles qui ballottent en marchant.
   if (regardFixe) {

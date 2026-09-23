@@ -329,10 +329,12 @@ const AMBIANCES = {
     hemi: 1.5, hemiCiel: '#e2f2ff', hemiSol: '#e8d7a8',
     astre: 2.6, astreCouleur: '#fff3dc', etoiles: 0, lune: 0, mer: '#3f95d8',
   },
+  // Nuit noire : au-delà de quelques mètres, seule la lanterne fait voir. La
+  // distance du brouillard dépend de son niveau (voir vision()).
   nuit: {
-    ciel: '#0b1120', brouillard: '#05080f', pres: 4, loin: 40,
-    hemi: 0.12, hemiCiel: '#6f86c9', hemiSol: '#1b1b24',
-    astre: 0.28, astreCouleur: '#9fb6ff', etoiles: 1, lune: 1, mer: '#12304a',
+    ciel: '#03050b', brouillard: '#010207', pres: 2, loin: 22,
+    hemi: 0.04, hemiCiel: '#5a6fae', hemiSol: '#0d0d14',
+    astre: 0.09, astreCouleur: '#8fa6f0', etoiles: 0.75, lune: 0.8, mer: '#06131f',
   },
   illumination: {
     ciel: '#3c5580', brouillard: '#2b3b5a', pres: 35, loin: 230,
@@ -388,7 +390,10 @@ export function creerIle(scene) {
   const bouees = creerBouees();
   scene.add(creerTerrain(), mer, creerPalmiers(), creerRochers(), creerHerbes(), creerCabane(), creerPonton(), ...bouees);
 
-  let cible = AMBIANCES.jour;
+  // La nuit de cette île : sa portée change avec la lanterne.
+  const nuit = { ...AMBIANCES.nuit };
+  const ambiances = { ...AMBIANCES, nuit };
+  let cible = ambiances.jour;
   const actuelle = { ...AMBIANCES.jour };
   const couleurs = Object.fromEntries(
     Object.entries(AMBIANCES.jour).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, new THREE.Color(v)]),
@@ -414,11 +419,16 @@ export function creerIle(scene) {
   return {
     // nom : 'jour' | 'nuit' | 'illumination'. instantane : sans fondu.
     ambiance(nom, instantane = false) {
-      cible = AMBIANCES[nom] ?? AMBIANCES.jour;
+      cible = ambiances[nom] ?? ambiances.jour;
       if (!instantane) return;
       Object.assign(actuelle, cible);
       for (const [k, c] of Object.entries(couleurs)) c.set(cible[k]);
       appliquer();
+    },
+    // Jusqu'où l'on voit la nuit (mètres) : la lanterne améliorée repousse le noir.
+    vision(loin) {
+      nuit.loin = loin;
+      nuit.pres = Math.max(2, loin / 11);
     },
     mettreAJour(t, dt = 0) {
       mer.userData.animer(t);

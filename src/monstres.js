@@ -293,8 +293,9 @@ export function creerMonstresVue(scene) {
     boss: [construireBoss()],
   };
   const matiere = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
-  // Des yeux qui brillent faiblement : on devine les zombies avant de les voir.
-  const lueurs = Object.fromEntries(Object.entries(LUEURS).map(([id, c]) => [id, new THREE.MeshBasicMaterial({ color: c })]));
+  // Des yeux qui brillent, même à travers le noir de la nuit (fog: false) :
+  // on devine les zombies bien avant de les voir.
+  const lueurs = Object.fromEntries(Object.entries(LUEURS).map(([id, c]) => [id, new THREE.MeshBasicMaterial({ color: c, fog: false })]));
   const pulsation = [new THREE.Color('#6fdc2c'), new THREE.Color('#d6ff7a')];
   const vues = new Map();
   let temps = 0;

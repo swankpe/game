@@ -1,28 +1,33 @@
 // Une partie du Protégé, côté navigateur : rôles, vue à la première personne,
-// tirs, poteau, lanterne, ambiance et interface de jeu. Le navigateur hôte
+// tirs, poteau, lanterne, coups reçus et relève, étoiles, ambiance et
+// interface de jeu. Le navigateur hôte
 // (premier du salon) fait en plus tourner la simulation et diffuse l'état du
 // monde ; les autres l'affichent et envoient leurs actions.
 
 import * as THREE from 'three';
 import { genererApercus } from './apercus.js';
 import { creerArme } from './arme.js';
+import { creerEtoilesVue } from './etoiles.js';
 import { BOUTIQUE, hauteurSol, hauteurTerrain } from './monde.js';
 import { creerMonstresVue } from './monstres.js';
 import { creerMusique } from './musique.js';
 import { HAUTEUR_LANTERNE, creerPoteau } from './poteau.js';
 import { creerProjectiles } from './projectiles.js';
 import {
-  ARMES, ARMES_DEPART, BONUS_MANCHE, BOSS, DISPERSION_MOUVEMENT, DISPERSION_SAUT, DISTANCE_BOUTIQUE, DISTANCE_PORTER,
-  EXPLOSION_BOUFFI, MULTIPLICATEUR_TETE, POTEAU_DEPART, PV_PROTEGE, TYPES_ZOMBIES, degatsExplosion, indiceArme,
-  positionPortee,
+  ARMES, ARMES_DEPART, BONUS_DEGATS_MAX, BONUS_MANCHE, BOSS, DISPERSION_MOUVEMENT, DISPERSION_SAUT, DISTANCE_BOUTIQUE,
+  DISTANCE_PORTER, ETOILES, EXPLOSION_BOUFFI, JOUEUR, LANTERNE, MULTIPLICATEUR_TETE, NIVEAU_LANTERNE_MAX, POTEAU_DEPART,
+  PV_PROTEGE, TYPES_ZOMBIES, armeAmelioree, degatsExplosion, indiceArme, positionPortee,
 } from './regles.js';
 import { creerSimulation, normaliserMonde } from './simulation.js';
 import {
-  sonCaisse, sonEclatement, sonExplosion, sonMort, sonRecharge, sonRugissement, sonTir, sonTouche, sonVictoire, sonVide,
+  sonCaisse, sonCoupRecu, sonEclatement, sonEtoile, sonExplosion, sonMort, sonRecharge, sonRugissement, sonTir, sonTouche,
+  sonVictoire, sonVide,
 } from './sons.js';
 import { creerVue } from './vue.js';
 
 const HAUTEUR_YEUX = 1.62;
+// À terre : les yeux au ras du sol, la vue penchée.
+const HAUTEUR_YEUX_TERRE = 0.38;
 const LEVEE_POTEAU = 0.3;
 const FACTEUR_PORTEUR = 0.6;
 const INTERVALLE_MONDE = 1 / 6;
@@ -34,7 +39,8 @@ const PORTEE_MANNEQUIN = 32;
 // par balle épuiserait vite le quota de Supabase.
 const INTERVALLE_TIRS = 0.1;
 const TIRS_MAX = 24;
-const DEGATS_BALLE_MAX = Math.max(...ARMES.filter((a) => !a.projectile).map((a) => a.degats)) * MULTIPLICATEUR_TETE;
+// Plafonds des dégâts reçus du réseau : balle dans la tête, arme au plus haut niveau.
+const DEGATS_BALLE_MAX = Math.max(...ARMES.filter((a) => !a.projectile).map((a) => a.degats)) * MULTIPLICATEUR_TETE * BONUS_DEGATS_MAX;
 const GRENADE = ARMES[indiceArme('lance')];
 // Bruits du rechargement, en fraction de sa durée : chargeur sorti, chargeur
 // engagé, culasse armée.
@@ -42,7 +48,18 @@ const ETAPES_RECHARGE = [0.22, 0.62, 0.86];
 // Une explosion déjà montrée n'est plus rejouée (elle reste 1,5 s dans les
 // instantanés) ; on l'oublie un peu après.
 const MEMOIRE_EXPLOSION = 2.5;
-const pleins = () => Object.fromEntries(ARMES.map((a) => [a.id, a.chargeur]));
+// Chargeurs pleins, à la taille de chaque arme améliorée.
+const pleins = (niveaux = []) => Object.fromEntries(ARMES.map((a, i) => [a.id, armeAmelioree(a, niveaux[i]).chargeur]));
+const NIVEAUX_VIDES = ARMES.map(() => 0);
+const etoilesTexte = (n) => '★'.repeat(n);
+// Vignette de la lanterne dans l'armurerie, dessinée en SVG.
+const IMAGE_LANTERNE = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160">
+<defs><radialGradient id="h"><stop offset="0" stop-color="#ffe7a3" stop-opacity=".9"/><stop offset="1" stop-color="#ffb347" stop-opacity="0"/></radialGradient>
+<linearGradient id="f" x1="0" x2="1"><stop offset="0" stop-color="#ffe2a8" stop-opacity=".75"/><stop offset="1" stop-color="#ffe2a8" stop-opacity="0"/></linearGradient></defs>
+<path d="M150 80 L320 20 L320 140 Z" fill="url(#f)"/><circle cx="118" cy="80" r="62" fill="url(#h)"/>
+<rect x="96" y="44" width="44" height="72" rx="8" fill="#2d2f36"/><rect x="104" y="56" width="28" height="48" rx="4" fill="#ffd98a"/>
+<rect x="92" y="36" width="52" height="10" rx="4" fill="#1e2025"/><rect x="92" y="114" width="52" height="10" rx="4" fill="#1e2025"/>
+<path d="M104 36 Q118 14 132 36" stroke="#1e2025" stroke-width="6" fill="none"/></svg>`)}`;
 const $ = (id) => document.getElementById(id);
 const arrondi = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
 const angle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -62,6 +79,7 @@ function mondeVide() {
     phase: 'attente', manche: 0, reste: 0, pv: PV_PROTEGE, protege: null,
     poteau: { x: POTEAU_DEPART.x, z: POTEAU_DEPART.z, porteur: null },
     illumination: 0, recharge: 0, tues: 0, monstres: [], comptes: {}, explosions: [], boss: null,
+    lanterne: 0, etoiles: [], vies: {},
   };
 }
 
@@ -81,6 +99,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   const poteau = creerPoteau(scene);
   const projectiles = creerProjectiles(scene);
   const musique = creerMusique();
+  const etoiles = creerEtoilesVue(scene);
   const apercus = genererApercus(rendu, ARMES.map((a) => a.id));
 
   let monId = null;
@@ -96,7 +115,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   let horloge = 0;
   let dernierEnvoi = -Infinity;
   let dernierEtat = null;
-  let precedent = { phase: 'attente', manche: 0, protege: null, pv: PV_PROTEGE, illumination: 0 };
+  let precedent = { phase: 'attente', manche: 0, protege: null, pv: PV_PROTEGE, illumination: 0, coups: 0, terre: false };
   let orientationPoteau = 0;
   const visee = { lacet: 0, tangage: -0.2 };
   let annonceFin = 0;
@@ -125,12 +144,23 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   let alertes = [];
   // Le boss tel qu'on l'a vu : pour annoncer son arrivée, ses cris, sa rage.
   let bossVu = { id: null, cris: 0, enrage: false };
+  // Relève en cours d'un allié (id) telle qu'annoncée à l'hôte.
+  let releveEnvoye = null;
+  let niveauxPrecedents = NIVEAUX_VIDES;
+  let lanternePrecedente = 0;
+  // Vue à terre, de 0 (debout) à 1 (au sol), lissée.
+  let chuteVue = 0;
 
   const estHote = () => membres.length > 0 && membres[0].id === monId;
   const nomDe = (id) => membres.find((m) => m.id === id)?.nom ?? 'Quelqu’un';
   const role = () => (monde.phase === 'attente' ? 'libre' : monde.protege === monId ? 'protege' : 'defenseur');
   const jePorte = () => monde.poteau.porteur === monId;
-  const monCompte = () => monde.comptes?.[monId] ?? { argent: 0, armes: ARMES_DEPART };
+  const monCompte = () => monde.comptes?.[monId] ?? { argent: 0, armes: ARMES_DEPART, niveaux: NIVEAUX_VIDES };
+  const niveauDe = (id) => monCompte().niveaux?.[indiceArme(id)] ?? 0;
+  const vieDe = (id) => monde.vies?.[id] ?? { coups: 0, terre: false, releve: 0 };
+  const aTerre = () => role() === 'defenseur' && vieDe(monId).terre;
+  // Autres défenseurs dans la partie : sans eux, on se relève seul.
+  const allies = () => membres.filter((m) => m.id !== monId && m.id !== monde.protege).length;
   const possede = (id) => (monCompte().armes & (1 << indiceArme(id))) !== 0;
   const pretBoutique = () => {
     const e = joueur.etat;
@@ -142,7 +172,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     infoFin = horloge + duree;
   }
 
-  const armeEnMain = () => ARMES[indiceArme(armeEquipee)];
+  // L'arme en main, avec ses améliorations (étoiles).
+  const armeEnMain = () => armeAmelioree(ARMES[indiceArme(armeEquipee)], niveauDe(armeEquipee));
 
   function equiper(id) {
     if (!possede(id)) {
@@ -180,7 +211,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       rechargement.etape += 1;
     }
     if (f >= 1) {
-      munitions[rechargement.id] = ARMES[indiceArme(rechargement.id)].chargeur;
+      munitions[rechargement.id] = armeAmelioree(ARMES[indiceArme(rechargement.id)], niveauDe(rechargement.id)).chargeur;
       rechargement = null;
     }
   }
@@ -201,7 +232,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   function positionsJoueurs() {
     const carte = avatars.positions();
     const e = joueur.etat;
-    carte.set(monId, { x: e.x, z: e.z, r: e.orientation });
+    carte.set(monId, { x: e.x, z: e.z, r: e.orientation, ar: indiceArme(armeEquipee) });
     return carte;
   }
 
@@ -311,9 +342,10 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   function exploser(position, locale) {
     effetExplosion(position, GRENADE.rayon, 'grenade');
     if (!locale) return;
-    // Seul le tireur compte les dégâts de sa grenade.
+    // Seul le tireur compte les dégâts de sa grenade (améliorée par ses étoiles).
+    const lance = armeAmelioree(GRENADE, niveauDe('lance'));
     const cibles = monstres.autourDe(position, GRENADE.rayon)
-      .map(({ id, distance: d }) => [id, degatsExplosion(GRENADE, d)])
+      .map(({ id, distance: d }) => [id, degatsExplosion(lance, d)])
       .filter(([, dg]) => dg > 0)
       .slice(0, 30);
     for (const [id] of cibles) monstres.secouer(id);
@@ -441,7 +473,35 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       bouton.addEventListener('click', () => acheterOuEquiper(a.id));
       carte.append(image, titre, texte, chargeur, stats, bouton);
       liste.append(carte);
-      cartes.set(a.id, { carte, bouton });
+      cartes.set(a.id, { carte, bouton, titre });
+    }
+
+    // La lanterne du protégé : une amélioration pour toute l'équipe.
+    const carte = document.createElement('article');
+    carte.className = 'arme-carte carte-lanterne';
+    const image = document.createElement('img');
+    image.src = IMAGE_LANTERNE;
+    image.alt = '';
+    const titre = document.createElement('h3');
+    titre.textContent = 'Lanterne du protégé';
+    const texte = document.createElement('p');
+    texte.textContent = 'Pour toute l’équipe : un faisceau plus long, plus large, plus fort, et la nuit recule.';
+    const niveau = document.createElement('p');
+    niveau.className = 'chargeur';
+    const bouton = document.createElement('button');
+    bouton.type = 'button';
+    bouton.className = 'principal';
+    bouton.addEventListener('click', ameliorerLanterne);
+    carte.append(image, titre, texte, niveau, bouton);
+    liste.append(carte);
+    cartes.set('lanterne', { carte, bouton, niveau });
+  }
+
+  function ameliorerLanterne() {
+    if (sim) {
+      if (sim.ameliorerLanterne(monId, positionsJoueurs())) urgent = true;
+    } else {
+      envoyer({ type: 'lanterne' });
     }
   }
 
@@ -454,7 +514,16 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       carte.dataset.etat = armeEquipee === a.id ? 'equipee' : achetee ? 'achetee' : argent >= a.prix ? 'abordable' : 'chere';
       bouton.disabled = armeEquipee === a.id || (!achetee && argent < a.prix);
       bouton.textContent = armeEquipee === a.id ? 'En main' : achetee ? 'Prendre en main' : `Acheter · ${a.prix} $`;
+      const n = niveauDe(a.id);
+      cartes.get(a.id).titre.textContent = n ? `${a.nom} ${etoilesTexte(n)}` : a.nom;
     }
+    const l = cartes.get('lanterne');
+    const n = monde.lanterne ?? 0;
+    const prix = LANTERNE.prix[n];
+    l.niveau.textContent = `Niveau ${n} / ${NIVEAU_LANTERNE_MAX} · la nuit s’ouvre à ${LANTERNE.brouillard[n]} m`;
+    l.carte.dataset.etat = n >= NIVEAU_LANTERNE_MAX ? 'equipee' : argent >= prix ? 'abordable' : 'chere';
+    l.bouton.disabled = n >= NIVEAU_LANTERNE_MAX || argent < prix;
+    l.bouton.textContent = n >= NIVEAU_LANTERNE_MAX ? 'Au plus haut' : `Améliorer · ${prix} $`;
   }
 
   function acheterOuEquiper(id) {
@@ -501,7 +570,9 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     const prix = document.createElement('span');
     prix.className = 'prix';
     prix.textContent = `${a.prix} $`;
-    c.append(image, touche, prix);
+    const niveau = document.createElement('span');
+    niveau.className = 'niveau';
+    c.append(image, touche, prix, niveau);
     c.addEventListener('click', () => equiper(a.id));
     $('barre-armes').append(c);
     cases.set(a.id, c);
@@ -510,6 +581,28 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     if (fps && !boutiqueOuverte && role() !== 'protege') armeSuivante(e.deltaY > 0 ? 1 : -1);
   }, { passive: true });
 
+  // Allié à terre à portée de relève, ou null.
+  function allieARelever() {
+    if (role() !== 'defenseur' || aTerre() || jePorte() || monde.phase !== 'manche') return null;
+    const e = joueur.etat;
+    let proche = null;
+    for (const [id, v] of Object.entries(monde.vies ?? {})) {
+      if (!v.terre || id === monId) continue;
+      const p = avatars.positionDe(id);
+      const d = p ? Math.hypot(p.x - e.x, p.z - e.z) : Infinity;
+      if (d <= JOUEUR.distanceReleve && (!proche || d < proche.d)) proche = { id, d };
+    }
+    return proche?.id ?? null;
+  }
+
+  // On relève tant que E reste enfoncé : l'hôte est prévenu au début et à la fin.
+  function annoncerReleve(cible) {
+    if (cible === releveEnvoye) return;
+    releveEnvoye = cible;
+    if (sim) sim.demanderRelever(monId, cible);
+    else envoyer({ type: 'relever', cible });
+  }
+
   function commandesLocales(dt) {
     const r = role();
     cadence -= dt;
@@ -517,6 +610,15 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       if (clavier.consommer('KeyE') || clavier.consommer('Escape')) fermerBoutique();
       return;
     }
+    // À terre : plus rien d'autre que regarder autour de soi.
+    if (aTerre()) {
+      for (const code of ['KeyE', 'KeyR', 'KeyF', 'Enter']) clavier.consommer(code);
+      annoncerReleve(null);
+      return;
+    }
+    const aRelever = allieARelever();
+    annoncerReleve(aRelever && clavier.enfoncee('KeyE') ? aRelever : null);
+    if (aRelever) clavier.consommer('KeyE');
     if (r !== 'protege' && clavier.consommer('KeyE')) {
       if (jePorte()) action('poser', () => sim.poser(monId));
       else if (pretBoutique()) ouvrirBoutique();
@@ -655,15 +757,29 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       annoncer('Illumination !', "Toute l'île est éclairée pendant 30 secondes.", 2.5);
     }
     if (pv < precedent.pv && protege === monId) degats = 1;
+    // Coups reçus, mise à terre, relève.
+    const v = vieDe(monId);
+    if (v.coups > (precedent.coups ?? 0) && phase === 'manche') {
+      degats = 1;
+      secousse = Math.max(secousse, 0.5);
+      sonCoupRecu();
+      if (!v.terre) informer('Touché ! Encore un coup et tu es à terre.', 2.2);
+    }
+    if (v.terre && !precedent.terre) {
+      annulerRechargement();
+      fermerBoutique();
+      infoFin = 0;
+    }
+    if (!v.terre && precedent.terre && phase === 'manche') informer('Te revoilà debout !', 2);
     if (phase !== 'manche') bossVu = { id: null, cris: 0, enrage: false };
     // Chaque manche repart chargeurs pleins ; une nouvelle partie oublie les
     // types déjà vus.
     if (phase === 'manche' && (precedent.phase !== 'manche' || manche !== precedent.manche)) {
       annulerRechargement();
-      munitions = pleins();
+      munitions = pleins(monCompte().niveaux);
       if (manche === 1) typesVus.clear();
     }
-    precedent = { phase, manche, protege, pv, illumination };
+    precedent = { phase, manche, protege, pv, illumination, coups: v.coups, terre: v.terre };
 
     // Argent gagné, arme achetée : on le montre, et la nouvelle arme passe en main.
     const { argent, armes } = monCompte();
@@ -686,6 +802,24 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     }
     argentPrecedent = argent;
     armesPrecedentes = armes;
+    // Étoile ramassée : l'arme monte d'un niveau, chargeur plein offert.
+    const niveaux = monCompte().niveaux ?? NIVEAUX_VIDES;
+    for (const [i, a] of ARMES.entries()) {
+      if ((niveaux[i] ?? 0) <= (niveauxPrecedents[i] ?? 0)) continue;
+      sonEtoile();
+      const ameliore = armeAmelioree(a, niveaux[i]);
+      munitions[a.id] = ameliore.chargeur;
+      if (rechargement?.id === a.id) annulerRechargement();
+      informer(`${etoilesTexte(niveaux[i])} ${a.nom} amélioré : niveau ${niveaux[i]} / ${ETOILES.niveauMax}`, 3);
+    }
+    niveauxPrecedents = niveaux;
+    // Lanterne améliorée par quelqu'un de l'équipe.
+    const lanterne = monde.lanterne ?? 0;
+    if (lanterne > lanternePrecedente) {
+      sonCaisse();
+      informer(`Lanterne améliorée : niveau ${lanterne} / ${NIVEAU_LANTERNE_MAX}`, 3);
+    }
+    lanternePrecedente = lanterne;
     // Nouvelle partie : les armes achetées sont perdues, retour au pistolet.
     if (!possede(armeEquipee)) {
       armeEquipee = 'pistolet';
@@ -748,8 +882,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       illum.hidden = true;
     }
 
-    const enMain = fps && r !== 'protege' && !boutiqueOuverte && !jePorte();
-    $('viseur').hidden = !fps || r === 'protege' || boutiqueOuverte;
+    const enMain = fps && r !== 'protege' && !boutiqueOuverte && !jePorte() && !aTerre();
+    $('viseur').hidden = !fps || r === 'protege' || boutiqueOuverte || aTerre();
     if (horloge > marqueurFin) delete $('viseur').dataset.touche;
     // Les traits du viseur s'écartent avec la dispersion réelle du tir.
     const demiChamp = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -761,20 +895,39 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     $('munitions-chargeur').textContent = String(reste);
     $('munitions-max').textContent = `/ ${a.chargeur}`;
     $('munitions').dataset.bas = String(reste <= Math.ceil(a.chargeur / 4));
-    $('munitions-nom').textContent = a.nom;
+    $('munitions-nom').textContent = a.niveau ? `${a.nom} ${etoilesTexte(a.niveau)}` : a.nom;
     const recharge = $('recharge');
     recharge.hidden = !enMain || !rechargement;
     if (rechargement) recharge.style.setProperty('--progression', String(Math.min(1, (horloge - rechargement.debut) / rechargement.duree)));
     $('annonce').hidden = horloge > annonceFin;
 
     const indication = $('indication');
-    const indice = horloge < infoFin ? infoTexte
-      : r === 'protege' || boutiqueOuverte ? ''
-        : jePorte() ? 'E : poser le poteau'
-          : pretBoutique() ? 'E : ouvrir l’armurerie'
-            : pretAPorter() ? 'E : porter le poteau' : '';
+    const aRelever = allieARelever();
+    const indice = releveEnvoye ? `Relève de ${nomDe(releveEnvoye)}…`
+      : horloge < infoFin ? infoTexte
+        : r === 'protege' || boutiqueOuverte || aTerre() ? ''
+          : aRelever ? `Maintiens E : relever ${nomDe(aRelever)}`
+            : jePorte() ? 'E : poser le poteau'
+              : pretBoutique() ? 'E : ouvrir l’armurerie'
+                : pretAPorter() ? 'E : porter le poteau' : '';
     indication.textContent = indice;
     indication.hidden = !fps || !indice;
+
+    // Coups encaissés : deux cœurs, et l'écran « à terre ».
+    const v = vieDe(monId);
+    const defenseur = fps && r === 'defenseur' && monde.phase === 'manche';
+    $('vies').hidden = !defenseur;
+    $('vies').dataset.restant = String(JOUEUR.coups - v.coups);
+    $('terre').hidden = !(defenseur && v.terre);
+    if (v.terre) {
+      $('terre-texte').textContent = allies()
+        ? 'Un allié peut te relever : il doit rester près de toi, E maintenu.'
+        : 'Personne pour te relever : tu te relèves seul dans un instant…';
+      $('terre').style.setProperty('--progression', String(v.releve));
+    }
+    const releve = releveEnvoye ? vieDe(releveEnvoye) : null;
+    $('releve').hidden = !releve;
+    if (releve) $('releve').style.setProperty('--progression', String(releve.releve));
 
     const { argent } = monCompte();
     $('argent').textContent = `${argent} $`;
@@ -782,6 +935,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     $('equipement').hidden = !fps || r === 'protege';
     for (const [id, c] of cases) {
       c.dataset.etat = armeEquipee === id ? 'equipee' : possede(id) ? 'achetee' : 'verrouillee';
+      c.querySelector('.niveau').textContent = etoilesTexte(niveauDe(id));
     }
     if (boutiqueOuverte) rafraichirBoutique();
     $('reprendre').hidden = !fps || boutiqueOuverte || vue.etat.verrouille || vue.etat.impossible;
@@ -792,7 +946,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           : 'ZQSD : marcher · Clic : tirer · R : recharger · 1-4 ou molette : arme · E : poteau / armurerie · Maj : courir · Échap : souris';
 
     degats = Math.max(0, degats - dt * 2.5);
-    $('degats').style.opacity = String(degats * 0.8);
+    // À terre, le voile rouge reste.
+    $('degats').style.opacity = String(Math.max(degats * 0.8, aTerre() ? 0.45 : 0));
   }
 
   for (const b of document.querySelectorAll('[data-role]')) {
@@ -825,10 +980,14 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       sim = null;
       dernierInstantane = null;
       monde = mondeVide();
-      precedent = { phase: 'attente', manche: 0, protege: null, pv: PV_PROTEGE, illumination: 0 };
+      precedent = { phase: 'attente', manche: 0, protege: null, pv: PV_PROTEGE, illumination: 0, coups: 0, terre: false };
       membres = [];
       monstres.vider();
       projectiles.vider();
+      etoiles.vider();
+      releveEnvoye = null;
+      niveauxPrecedents = NIVEAUX_VIDES;
+      lanternePrecedente = 0;
       musique.arreter(0.3);
       bossVu = { id: null, cris: 0, enrage: false };
       tirsEnAttente = [];
@@ -836,7 +995,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       armeEquipee = 'pistolet';
       arme.equiper('pistolet');
       annulerRechargement();
-      munitions = pleins();
+      munitions = pleins(NIVEAUX_VIDES);
       explosionsVues.clear();
       typesVus.clear();
       argentPrecedent = 0;
@@ -896,7 +1055,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         if (!sim || !Array.isArray(d.c)) return;
         for (const c of d.c.slice(0, 30)) {
           if (Array.isArray(c) && Number.isInteger(c[0]) && Number.isFinite(c[1])) {
-            if (sim.toucher(c[0], Math.min(c[1], GRENADE.degats), de)) urgent = true;
+            if (sim.toucher(c[0], Math.min(c[1], GRENADE.degats * BONUS_DEGATS_MAX), de)) urgent = true;
           }
         }
       } else if (sim) {
@@ -905,6 +1064,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           poser: () => sim.poser(de),
           illuminer: () => sim.demanderIllumination(de),
           acheter: () => typeof d.arme === 'string' && sim.acheter(de, d.arme, positionsJoueurs()),
+          lanterne: () => sim.ameliorerLanterne(de, positionsJoueurs()),
+          relever: () => sim.demanderRelever(de, typeof d.cible === 'string' ? d.cible : null),
           lancer: () => {
             sim.definirMembres(membres, { roleSolo });
             return sim.demarrer();
@@ -935,6 +1096,11 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           rechargement: rechargement ? rechargement.id : null,
           progression: rechargement ? (horloge - rechargement.debut) / rechargement.duree : null,
           explosions: [...explosionsVues.keys()],
+          vie: vieDe(monId),
+          vies: monde.vies,
+          etoiles: (monde.etoiles ?? []).map((e) => [e.x, e.z]),
+          lanterne: monde.lanterne ?? 0,
+          niveaux: monCompte().niveaux,
           boss: bossEnJeu(),
           musique: musique.active,
           joueur: [joueur.etat.x, joueur.etat.y, joueur.etat.z],
@@ -969,6 +1135,13 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           if (sim.toucher(id, degats, monId)) urgent = true;
           return true;
         },
+        // Hôte seulement : poser une étoile.
+        poserEtoile(x, z) {
+          if (!sim) return false;
+          sim.etat.etoiles.push({ id: sim.etat.prochaineEtoile++, x, z, age: 0 });
+          urgent = true;
+          return true;
+        },
         // Hôte seulement : le chrono tombe à zéro, le boss arrive.
         finirChrono() {
           if (!sim || sim.etat.phase !== 'manche') return false;
@@ -985,6 +1158,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         recharger,
         boutique: () => ({ ouverte: boutiqueOuverte, arme: armeEquipee, compte: monCompte() }),
         acheter: acheterOuEquiper,
+        ameliorerLanterne,
       };
     },
 
@@ -1019,8 +1193,9 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       if (fps !== enJeu) enJeu ? this.entrer() : this.sortir();
       if (fps) commandesLocales(dt);
       else clavier.oublier();
-      // Plus d'arme en main (poteau porté, boutique, protégé) : on arrête de recharger.
-      if (!fps || role() === 'protege' || jePorte() || boutiqueOuverte) annulerRechargement();
+      // Plus d'arme en main (poteau porté, boutique, protégé, à terre) : on arrête de recharger.
+      if (!fps || role() === 'protege' || jePorte() || boutiqueOuverte || aTerre()) annulerRechargement();
+      if (!fps) annoncerReleve(null);
       suivreRechargement();
       const enMain = armeEnMain();
       vue.stabiliser(dt, enMain.retour);
@@ -1029,7 +1204,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       const r = role();
       if (fps && r === 'protege') fermerBoutique();
       if (fps && r !== 'protege') {
-        const commandes = boutiqueOuverte ? { avant: 0, lateral: 0, course: false, saut: false } : clavier.commandes();
+        const immobile = boutiqueOuverte || aTerre();
+        const commandes = immobile ? { avant: 0, lateral: 0, course: false, saut: false } : clavier.commandes();
         joueur.mettreAJour(dt, commandes, vue.etat.lacet, {
           orientation: vue.etat.lacet + Math.PI,
           facteur: jePorte() ? FACTEUR_PORTEUR : 1,
@@ -1038,6 +1214,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       const porteur = monde.poteau.porteur;
       avatars.mettreAJour(dt, (id) => {
         if (monde.phase !== 'attente' && id === monde.protege) return 'attache';
+        if (monde.phase === 'manche' && vieDe(id).terre) return 'terre';
         if (id === porteur) return 'porte';
         return 'arme';
       });
@@ -1051,9 +1228,11 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         e.vitesse = 0;
         e.orientation = vue.etat.lacet + Math.PI;
       }
+      chuteVue += ((aTerre() ? 1 : 0) - chuteVue) * (1 - Math.exp(-dt * 6));
       if (fps) {
         const e = joueur.etat;
-        vue.appliquer(camera, e.x, e.y + HAUTEUR_YEUX, e.z);
+        vue.appliquer(camera, e.x, e.y + HAUTEUR_YEUX + (HAUTEUR_YEUX_TERRE - HAUTEUR_YEUX) * chuteVue, e.z);
+        camera.rotation.z = chuteVue * 0.35;
         // Une explosion proche secoue la vue.
         if (secousse > 0) {
           camera.position.x += (Math.random() - 0.5) * 0.12 * secousse;
@@ -1061,9 +1240,15 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         }
       }
       secousse = Math.max(0, secousse - dt * 2.5);
-      arme.afficher(fps && r !== 'protege' && !jePorte());
+      arme.afficher(fps && r !== 'protege' && !jePorte() && !aTerre());
       arme.mettreAJour(dt, joueur.etat.vitesse);
       monstres.mettreAJour(dt, !!sim);
+      etoiles.appliquer(monde.phase === 'attente' ? [] : monde.etoiles ?? []);
+      etoiles.mettreAJour(dt);
+      // La lanterne améliorée éclaire plus loin, et la nuit recule d'autant.
+      const niveauLanterne = monde.lanterne ?? 0;
+      poteau.ameliorer(niveauLanterne);
+      ile.vision(LANTERNE.brouillard[niveauLanterne]);
 
       // Tirs des autres, rejoués au fil de l'eau.
       if (tirsDifferes.length) {

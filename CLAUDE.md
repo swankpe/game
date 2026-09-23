@@ -33,11 +33,12 @@ valide.
 | Message (broadcast `jeu`) | Émetteur | Contenu |
 | --- | --- | --- |
 | `etat` | chaque joueur | position, orientation du corps `r`, regard `vp`, arme en main `ar` |
-| `monde` | l'hôte | l'instantané complet : zombies et leur type `k`, explosions de bouffis `ex`, boss `bo` (id, points de vie max, nombre de cris), argent et armes (voir `normaliserMonde`) |
+| `monde` | l'hôte | l'instantané complet : zombies et leur type `k`, explosions de bouffis `ex`, boss `bo` (id, points de vie max, nombre de cris), niveau de lanterne `la`, étoiles `et`, coups et relève des défenseurs `vi`, argent, armes et niveaux d'armes `jo` (voir `normaliserMonde`) |
 | `tirs` | le tireur | paquet de balles (100 ms) : trajectoires, et `m`, `dg` si un zombie est touché |
 | `grenade` | le tireur | départ et vitesse : chaque navigateur simule la même trajectoire |
 | `explosion` | le tireur | zombies touchés par sa grenade et dégâts |
-| `porter`, `poser`, `illuminer`, `lancer`, `acheter` | un joueur | demande que seul l'hôte applique |
+| `porter`, `poser`, `illuminer`, `lancer`, `acheter`, `lanterne` | un joueur | demande que seul l'hôte applique |
+| `relever` | un joueur | début (`cible` : l'allié à terre) ou fin (`cible: null`) d'une relève, E maintenu |
 
 Le tireur détecte lui-même l'impact (sur les zombies tels qu'il les voit) : entre
 amis, on fait confiance, l'hôte ne fait que borner les dégâts et crédite
@@ -57,6 +58,14 @@ le fait apparaître ; la manche n'est gagnée que lorsqu'il a disparu de la list
 cris (renforts) sont un compteur dans `bo` : chaque navigateur rugit quand il
 augmente ; la rage se déduit de ses points de vie. Barre de vie, musique et
 annonces se déduisent donc de l'instantané, sans message à part.
+
+Les zombies visent aussi les défenseurs : l'hôte les connaît par les
+positions reçues (`joueurs` passé à `pas()`, avec l'arme en main `ar`), donne
+les coups, met à terre et relève (`s.vies`). Les étoiles tombent, se
+ramassent et améliorent les armes chez l'hôte aussi ; le tireur applique
+lui-même le niveau de son arme (`armeAmelioree`) à ses dégâts, son chargeur
+et son rechargement, et l'hôte borne les dégâts reçus en conséquence
+(`BONUS_DEGATS_MAX`).
 
 Chargeurs, rechargement et recul ne concernent que le tireur : rien ne passe
 par le réseau ni par l'hôte.
@@ -83,6 +92,7 @@ message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
 | `src/armes.js` | modèles des 4 armes et de la grenade (profils extrudés, biseautés) |
 | `src/apercus.js` | vignettes des armes photographiées au démarrage, pour la boutique et la barre d'armes |
 | `src/projectiles.js` | grenades en vol, découpées en pas de 20 ms |
+| `src/etoiles.js` | étoiles d'amélioration au sol : étoile, halo, colonne de lumière, sans lumière ajoutée |
 | `src/monstres.js` | zombies à l'écran, 4 silhouettes et allures : 6 maillages chacun, géométries partagées |
 | `src/poteau.js` | mât, cordes, lanterne orientable, mannequin de paille |
 | `src/arme.js` | arme à la première personne (mains, changement d'arme, rechargement), éclairs, traînées, explosions |
@@ -101,7 +111,8 @@ npm test
 
 `node:test` couvre la simulation (manches, défaite, tirage, poteau,
 Illumination, argent, achats, types de zombies, explosions de bouffis en
-chaîne, boss (apparition, renforts, rage, victoire, reprise), contournement des obstacles, reprise par un nouvel hôte), les règles,
+chaîne, boss (apparition, renforts, rage, victoire, reprise), coups sur les
+joueurs et relève, étoiles, lanterne, contournement des obstacles, reprise par un nouvel hôte), les règles,
 le salon et un salon
 complet sur `BroadcastChannel` (qui existe dans Node). Aucun test n'appelle
 Supabase.
@@ -111,9 +122,11 @@ Le jeu lui-même ne se vérifie qu'avec Playwright, dans Chromium lancé avec
 `?debug` expose `window.leProtege` : `etat()` (munitions, `progression` du
 rechargement, `ids` des zombies et `boss` compris), `viser(x, y, z)`, `teleporter(x, z)`, `acheter(id)`,
 `equiper(id)`, `recharger()`, `boutique()`, et pour l'hôte `crediter(n, id)`,
-`illuminer()`, `finirChrono()` (le boss arrive), `blesser(id, degats)` et
+`illuminer()`, `finirChrono()` (le boss arrive), `blesser(id, degats)`,
+`poserEtoile(x, z)`, `ameliorerLanterne()` et
 `poserZombie(type, x, z, vitesse, pv)` (immobile par défaut : pratique pour
-photographier un modèle). Pièges :
+photographier un modèle). `etat()` donne aussi `vie`, `vies`, `etoiles`,
+`lanterne` et `niveaux`. Pièges :
 - `#hud` mesure 0×0 (enfants en `position: fixed`) : attendre `#hud .salon`.
 - Cliquer sur une zone libre de la scène : dans une petite fenêtre, le centre
   tombe sur la carte du salon et la souris n'est jamais verrouillée.
@@ -151,6 +164,12 @@ photographier un modèle). Pièges :
 - La barre d'armes est à gauche : à droite, elle recouvrait l'arme en main.
 - Une lumière placée à l'intérieur d'un maillage n'éclaire que ce qui
   l'entoure : le halo du boss est devant son torse, sinon il restait noir.
+- La nuit est un brouillard presque noir (22 m au départ, repoussé par la
+  lanterne : `ile.vision()`). Ce qui doit se voir de loin dans le noir (yeux
+  des zombies, étoiles) a `fog: false`, sinon le brouillard l'avale aussi.
+- Le passage du jour à la nuit est un fondu de quelques secondes : en rendu
+  logiciel (quelques images par seconde), une capture prise juste après le
+  lancement montre encore le crépuscule.
 - Musique : les notes sont programmées 0,2 s en avance à chaque image. Après
   un onglet en arrière-plan, on repart du présent (sinon tout le retard sort
   d'un coup).

@@ -85,7 +85,8 @@ export function creerAvatars(scene) {
       avatar.cible = e;
     },
 
-    // poseDe(id) : 'libre' | 'arme' | 'porte' | 'attache', choisi selon le rôle.
+    // poseDe(id) : 'libre' | 'arme' | 'porte' | 'attache' | 'terre', choisi
+    // selon le rôle. À terre, l'étiquette le signale aux alliés.
     mettreAJour(dt, poseDe = () => 'libre') {
       const t = 1 - Math.exp(-dt * 10);
       for (const avatar of avatars.values()) {
@@ -99,7 +100,9 @@ export function creerAvatars(scene) {
           avatar.vitesse += (cible.v - avatar.vitesse) * t;
           equiperPersonnage(modele, ARMES[cible.ar].id);
         }
-        animerPersonnage(modele, dt, { vitesse: avatar.vitesse, pose: poseDe(avatar.id) });
+        const pose = poseDe(avatar.id);
+        animerPersonnage(modele, dt, { vitesse: avatar.vitesse, pose });
+        avatar.etiquette.element.classList.toggle('a-terre', pose === 'terre');
       }
     },
 
@@ -123,7 +126,7 @@ export function creerAvatars(scene) {
     // Dernières positions reçues, pour la simulation de l'hôte.
     positions() {
       const carte = new Map();
-      for (const [id, a] of avatars) if (a.cible) carte.set(id, { x: a.cible.x, z: a.cible.z, r: a.cible.r });
+      for (const [id, a] of avatars) if (a.cible) carte.set(id, { x: a.cible.x, z: a.cible.z, r: a.cible.r, ar: a.cible.ar });
       return carte;
     },
 

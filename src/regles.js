@@ -58,11 +58,72 @@ export const DISPERSION_MOUVEMENT = 0.0016;
 export const DISPERSION_SAUT = 0.015;
 
 export const indiceArme = (id) => ARMES.findIndex((a) => a.id === id);
+
+// Étoiles d'amélioration, lâchées parfois par un zombie abattu (chance : voir
+// TYPES_ZOMBIES ; le boss en lâche boss). Celui qui marche dessus améliore
+// l'arme qu'il tient (sinon une autre des siennes, sinon il touche prime).
+// Chaque niveau : +25 % de dégâts, +20 % de chargeur, rechargement 12 % plus
+// court. Une étoile disparaît au bout de duree secondes.
+export const ETOILES = {
+  niveauMax: 3,
+  degats: 0.25, chargeur: 0.2, rechargement: 0.12,
+  duree: 30, max: 8, rayon: 1.3, boss: 3, prime: 100,
+};
+
+// Une arme à un niveau d'amélioration donné (0 : telle qu'achetée).
+export function armeAmelioree(arme, niveau = 0) {
+  const n = Math.min(Math.max(niveau | 0, 0), ETOILES.niveauMax);
+  if (!n) return arme;
+  return {
+    ...arme,
+    niveau: n,
+    degats: arme.degats * (1 + ETOILES.degats * n),
+    chargeur: Math.round(arme.chargeur * (1 + ETOILES.chargeur * n)),
+    rechargement: arme.rechargement * (1 - ETOILES.rechargement * n),
+  };
+}
+
+// Multiplicateur de dégâts au plus haut niveau : l'hôte borne les dégâts
+// reçus du réseau avec.
+export const BONUS_DEGATS_MAX = 1 + ETOILES.degats * ETOILES.niveauMax;
 // Armes possédées : un bit par arme, le pistolet (bit 0) toujours présent.
 export const ARMES_DEPART = 1;
 
 export const BONUS_MANCHE = 150;
 export const DISTANCE_BOUTIQUE = 3.2;
+
+// La lanterne du protégé, améliorable à l'armurerie pour toute l'équipe :
+// prix du niveau suivant, puis par niveau (0 à 3) la portée du faisceau (m),
+// son demi-angle (rad), sa puissance, et la distance où la nuit avale tout
+// (brouillard, m). La nuit est noire : c'est la lanterne qui fait voir loin.
+export const LANTERNE = {
+  prix: [300, 600, 1000],
+  portee: [36, 46, 56, 68],
+  angle: [0.45, 0.55, 0.65, 0.76],
+  puissance: [1, 1.2, 1.45, 1.7],
+  brouillard: [22, 28, 35, 44],
+};
+export const NIVEAU_LANTERNE_MAX = LANTERNE.prix.length;
+
+// Les joueurs aussi sont attaqués. Un zombie à moins de aggro mètres d'un
+// défenseur (et plus près de lui que du poteau) se jette sur lui ; il frappe
+// toutes les cadence secondes (multipliées par celle de son type). Au bout de
+// coups coups, le défenseur est à terre : un allié le relève en restant près
+// de lui, E maintenu, pendant dureeReleve. Sans autre défenseur dans la
+// partie, on se relève seul au bout de releveSeul. Un coup s'efface après
+// soin secondes sans être touché ; repit : invulnérable juste après un coup.
+// Un bouffi qui éclate à moins de explosion mètres donne un coup.
+export const JOUEUR = {
+  coups: 2,
+  aggro: 6,
+  cadence: 1.1,
+  repit: 1,
+  soin: 12,
+  distanceReleve: 1.8,
+  dureeReleve: 3,
+  releveSeul: 15,
+  explosion: 2.5,
+};
 
 export const DUREE_ILLUMINATION = 30;
 export const RECHARGE_ILLUMINATION = 180;
@@ -76,28 +137,33 @@ export const MONSTRES_MAX = 60;
 // Les types de zombies, dans l'ordre de leur indice k (instantanés). pv,
 // vitesse et degats multiplient les valeurs de la manche ; largeur et hauteur,
 // la silhouette (et donc la zone à toucher) ; recompense : argent du tueur.
-// max : nombre de ce type en même temps sur l'île.
+// max : nombre de ce type en même temps sur l'île ; etoile : chance de lâcher
+// une étoile ; coups : coups portés à un joueur par attaque (1 par défaut) ;
+// cadence : lenteur de ses attaques (1 par défaut).
 export const TYPES_ZOMBIES = [
   {
-    id: 'rodeur', nom: 'Rôdeur', pv: 1, vitesse: 1, degats: 1, largeur: 1, hauteur: 1, recompense: 10,
+    id: 'rodeur', nom: 'Rôdeur', pv: 1, vitesse: 1, degats: 1, largeur: 1, hauteur: 1, recompense: 10, etoile: 0.04,
     alerte: '',
   },
   {
-    id: 'coureur', nom: 'Coureur', pv: 0.6, vitesse: 1.6, degats: 0.7, largeur: 0.9, hauteur: 0.95, recompense: 15,
+    id: 'coureur', nom: 'Coureur', pv: 0.6, vitesse: 1.6, degats: 0.7, largeur: 0.9, hauteur: 0.95, recompense: 15, etoile: 0.05,
     alerte: 'Coureurs : rapides mais fragiles.',
   },
   {
     id: 'colosse', nom: 'Colosse', pv: 6, vitesse: 0.6, degats: 2.5, largeur: 1.5, hauteur: 1.45, recompense: 60, max: 4,
+    etoile: 0.35, cadence: 1.6,
     alerte: 'Un colosse ! Lent, mais il encaisse : visez la tête.',
   },
   {
     id: 'bouffi', nom: 'Bouffi', pv: 1.5, vitesse: 0.85, degats: 0, largeur: 1.4, hauteur: 0.95, recompense: 25, explosif: true,
-    alerte: 'Un bouffi ! Il explose : abattez-le loin du poteau.',
+    etoile: 0.06,
+    alerte: 'Un bouffi ! Il explose : abattez-le loin du poteau (et de vous).',
   },
   // Le boss de fin de manche (voir BOSS) : jamais tiré au sort, ses points de
   // vie viennent de pvBoss.
   {
     id: 'boss', nom: 'Le Roi Noyé', pv: 1, vitesse: 0.42, degats: 4, largeur: 3, hauteur: 3, recompense: 250, boss: true,
+    etoile: 1, coups: 2, cadence: 1.8,
     alerte: '',
   },
 ];

@@ -31,6 +31,10 @@ export function creerClavier() {
     consommer(code) {
       return appuis.delete(code);
     },
+    // Vrai tant que la touche reste enfoncée (E pour relever un allié).
+    enfoncee(code) {
+      return enfoncees.has(code);
+    },
     oublier() {
       appuis.clear();
     },

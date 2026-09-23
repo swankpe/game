@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { animerPersonnage, creerPersonnage } from './personnage.js';
+import { LANTERNE } from './regles.js';
 
 const MANNEQUIN = {
   tete: 'patate', yeux: 'petits', chapeau: 'paille',
@@ -11,7 +12,8 @@ const MANNEQUIN = {
 };
 
 export const HAUTEUR_LANTERNE = 2.35;
-// Intensité du faisceau et de la lueur (en candelas, unités physiques de Three.js).
+// Intensité du faisceau et de la lueur (en candelas, unités physiques de
+// Three.js), au niveau 0 de la lanterne (LANTERNE dans regles.js).
 const FAISCEAU = 170;
 const LUEUR = 7;
 
@@ -68,6 +70,9 @@ export function creerPoteau(scene) {
   lueur.position.set(0, HAUTEUR_LANTERNE - 0.2, 0.3);
   groupe.add(lueur);
 
+  let allumage = 0;
+  let puissance = 1;
+
   const mannequin = creerPersonnage(MANNEQUIN);
   mannequin.visible = false;
   groupe.add(mannequin);
@@ -90,9 +95,23 @@ export function creerPoteau(scene) {
     },
     // 0 : éteinte (le jour), 1 : allumée.
     allumer(niveau) {
-      faisceau.intensity = FAISCEAU * niveau;
-      lueur.intensity = LUEUR * niveau;
+      allumage = niveau;
+      faisceau.intensity = FAISCEAU * niveau * puissance;
+      lueur.intensity = LUEUR * niveau * puissance;
       verre.color.set(niveau > 0 ? '#ffd98a' : '#8a7a5a');
+    },
+    // Niveau de la lanterne achetée à l'armurerie : plus loin, plus large, plus fort.
+    ameliorer(niveau) {
+      const n = Math.min(Math.max(niveau | 0, 0), LANTERNE.portee.length - 1);
+      if (faisceau.userData.niveau === n) return;
+      faisceau.userData.niveau = n;
+      faisceau.distance = LANTERNE.portee[n];
+      faisceau.angle = LANTERNE.angle[n];
+      faisceau.shadow.camera.far = LANTERNE.portee[n];
+      faisceau.shadow.camera.updateProjectionMatrix();
+      puissance = LANTERNE.puissance[n];
+      vitre.scale.setScalar(1 + n * 0.12);
+      this.allumer(allumage);
     },
     // occupant : 'personne' (lobby), 'mannequin' ou 'humain' (dessiné par avatars.js).
     occuper(occupant) {

@@ -252,3 +252,45 @@ export function sonVictoire() {
     o.stop(debut + tenu + 0.05);
   });
 }
+
+// Coup encaissé : un choc sourd et un souffle court.
+export function sonCoupRecu() {
+  const ctx = audio();
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  const o = ctx.createOscillator();
+  o.frequency.setValueAtTime(120, t);
+  o.frequency.exponentialRampToValueAtTime(38, t + 0.25);
+  o.connect(enveloppe(ctx, 0.9, 0.3));
+  o.start(t);
+  o.stop(t + 0.32);
+  const b = ctx.createBufferSource();
+  b.buffer = bruit;
+  const f = ctx.createBiquadFilter();
+  f.type = 'lowpass';
+  f.frequency.value = 900;
+  b.connect(f).connect(enveloppe(ctx, 0.4, 0.18));
+  b.start(t);
+  b.stop(t + 0.2);
+}
+
+// Étoile ramassée : un arpège scintillant.
+export function sonEtoile() {
+  const ctx = audio();
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  [84, 88, 91, 96].forEach((n, i) => {
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.value = 440 * 2 ** ((n - 69) / 12);
+    const g = ctx.createGain();
+    const debut = t + i * 0.06;
+    g.gain.setValueAtTime(0.0001, debut);
+    g.gain.exponentialRampToValueAtTime(0.14, debut + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, debut + 0.35);
+    g.connect(ctx.destination);
+    o.connect(g);
+    o.start(debut);
+    o.stop(debut + 0.4);
+  });
+}

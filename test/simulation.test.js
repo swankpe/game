@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { creerSimulation, normaliserMonde } from '../src/simulation.js';
 import {
   ARMES, ARMES_DEPART, BONUS_MANCHE, DISTANCE_PORTER, DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE,
-  BOSS, EXPLOSION_BOUFFI, HAUTEUR_TETE, PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART, RECHARGE_ILLUMINATION, TYPES_ZOMBIES,
+  BOSS, ETOILES, EXPLOSION_BOUFFI, HAUTEUR_TETE, JOUEUR, LANTERNE, NIVEAU_LANTERNE_MAX, armeAmelioree, PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART, RECHARGE_ILLUMINATION, TYPES_ZOMBIES,
   degatsExplosion, indiceArme, indiceType, monstresParMinute, poidsTypes, positionPortee, premierTouche, pvBoss,
   pvMonstre, renfortsBoss, tirerProtege, tirerType, vitesseMonstre,
 } from '../src/regles.js';
@@ -315,9 +315,9 @@ test("argent et armes survivent au départ de l'hôte", () => {
   ancien.etat.comptes.a = { argent: 320, armes: 5 };
   const nouveau = creerSimulation();
   assert.ok(nouveau.charger(JSON.parse(JSON.stringify(ancien.instantane()))));
-  assert.deepEqual(nouveau.etat.comptes.a, { argent: 320, armes: 5 });
-  const tordu = normaliserMonde({ ph: 'manche', jo: { x: [-5, 1], y: [10, 999], z: 'rien' } });
-  assert.deepEqual(tordu.comptes, { y: { argent: 10, armes: 999 & 15 } });
+  assert.deepEqual(nouveau.etat.comptes.a, { argent: 320, armes: 5, niveaux: [0, 0, 0, 0] });
+  const tordu = normaliserMonde({ ph: 'manche', jo: { x: [-5, 1], y: [10, 999, [3, 9, -1, 'a']], z: 'rien' } });
+  assert.deepEqual(tordu.comptes, { y: { argent: 10, armes: 999 & 15, niveaux: [3, ETOILES.niveauMax, 0, 0] } });
 });
 
 test('les zombies résistent mieux et courent plus vite de manche en manche', () => {
@@ -568,4 +568,206 @@ test('le boss peut arriver plus tôt : sa chute gagne la manche sans attendre le
   sim.pas(0.1, joueurs());
   assert.equal(s.phase, 'pause');
   assert.equal(s.manche, 2);
+});
+
+// --- Attaques contre les joueurs ------------------------------------------
+
+// Une manche sans apparitions, avec un défenseur d et un zombie posé à côté.
+function duel(type = 'rodeur', ids = ['a', 'b', 'c']) {
+  const sim = lancer(ids);
+  const s = sim.etat;
+  s.monstres = [];
+  s.cumul = -1e9;
+  const [d, allie] = ids.filter((id) => id !== s.protege);
+  // Loin du poteau, pour que le zombie préfère le joueur.
+  const j = joueurs({ [d]: { x: -20, z: 20, r: 0, ar: 0 }, ...(allie ? { [allie]: { x: 20, z: -20, r: 0, ar: 0 } } : {}) });
+  const m = seul(sim, type, -21, 20);
+  return { sim, s, d, allie, j, m };
+}
+
+function pendant(sim, secondes, j) {
+  for (let t = 0; t < secondes - 1e-9; t += 0.1) sim.pas(0.1, j);
+}
+
+test('un zombie proche se jette sur le défenseur : deux coups et il est à terre', () => {
+  const { sim, s, d, j, m } = duel();
+  pendant(sim, 0.3, j);
+  assert.equal(m.a, true, 'au contact du joueur');
+  assert.equal(s.pv, PV_PROTEGE, 'le protégé ne perd rien');
+  pendant(sim, 0.3, j);
+  assert.equal(s.vies[d].coups, 1);
+  pendant(sim, JOUEUR.cadence * 0.5, j);
+  assert.equal(s.vies[d].coups, 1, 'pas deux coups coup sur coup');
+  pendant(sim, JOUEUR.cadence, j);
+  assert.equal(s.vies[d].terre, true);
+  assert.deepEqual(sim.instantane().vi[d].slice(0, 2), [2, 1]);
+  // À terre, on n'intéresse plus les zombies : celui-ci repart vers le poteau.
+  const avant = Math.hypot(m.x - s.poteau.x, m.z - s.poteau.z);
+  pendant(sim, 2, j);
+  assert.ok(Math.hypot(m.x - s.poteau.x, m.z - s.poteau.z) < avant - 2);
+  assert.ok(!sim.demanderPorter(d, joueurs({ [d]: { x: s.poteau.x, z: s.poteau.z, r: 0 } })), 'à terre, on ne porte rien');
+});
+
+test('un coup s’efface avec le temps ; le boss met à terre d’un seul coup', () => {
+  const { sim, s, d, j, m } = duel();
+  pendant(sim, 0.7, j);
+  assert.equal(s.vies[d].coups, 1);
+  s.monstres = [];
+  pendant(sim, JOUEUR.soin + 0.2, j);
+  assert.equal(s.vies[d].coups, 0);
+  assert.ok(m);
+
+  const autre = duel('boss');
+  autre.m.pv = 5000;
+  pendant(autre.sim, 1, autre.j);
+  assert.equal(autre.s.vies[autre.d].terre, true);
+});
+
+test('un allié relève en restant près, E maintenu ; seul, on se relève tout seul', () => {
+  const { sim, s, d, allie, j } = duel();
+  pendant(sim, 2, j);
+  assert.equal(s.vies[d].terre, true);
+  s.monstres = [];
+  // Trop loin : la demande est enregistrée mais n'avance pas.
+  assert.ok(sim.demanderRelever(allie, d));
+  pendant(sim, 1, j);
+  assert.equal(s.vies[d].releve, 0);
+  j.set(allie, { x: -19, z: 20.5, r: 0 });
+  pendant(sim, JOUEUR.dureeReleve * 0.5, j);
+  assert.ok(s.vies[d].releve > 0.4 && s.vies[d].terre);
+  // Il lâche E : la relève retombe.
+  sim.demanderRelever(allie, null);
+  pendant(sim, 0.5, j);
+  assert.ok(s.vies[d].releve < 0.4);
+  sim.demanderRelever(allie, d);
+  pendant(sim, JOUEUR.dureeReleve + 0.2, j);
+  assert.equal(s.vies[d].terre, false);
+  assert.equal(s.vies[d].coups, 0);
+  assert.ok(!sim.demanderRelever(allie, d), 'debout : plus rien à relever');
+  assert.ok(!sim.demanderRelever(s.protege, d), 'le protégé est ligoté');
+
+  // Seul défenseur (l'autre joueur est le protégé) : relève automatique.
+  const solo = duel('rodeur', ['a', 'b']);
+  pendant(solo.sim, 2, solo.j);
+  assert.equal(solo.s.vies[solo.d].terre, true);
+  solo.s.monstres = [];
+  pendant(solo.sim, JOUEUR.releveSeul - 1, solo.j);
+  assert.equal(solo.s.vies[solo.d].terre, true);
+  pendant(solo.sim, 1.2, solo.j);
+  assert.equal(solo.s.vies[solo.d].terre, false);
+});
+
+test('un bouffi qui éclate près d’un défenseur lui donne un coup', () => {
+  const { sim, s, d, j } = duel();
+  s.monstres = [];
+  pendant(sim, 0.1, j);
+  const b = seul(sim, 'bouffi', -19, 20);
+  sim.toucher(b.id, 999);
+  assert.equal(s.vies[d].coups, 1);
+});
+
+test('fin de manche ou défaite : tout le monde est relevé', () => {
+  const { sim, s, d, j } = duel();
+  pendant(sim, 2, j);
+  assert.equal(s.vies[d].terre, true);
+  s.monstres = [];
+  s.reste = 0.05;
+  pendant(sim, 0.2, j);
+  const boss = s.monstres.find((m) => m.id === s.boss.id);
+  Object.assign(boss, { x: 40, z: 40 });
+  while (!sim.toucher(boss.id, 150));
+  sim.pas(0.1, j);
+  assert.equal(s.phase, 'pause');
+  assert.deepEqual(s.vies, {});
+});
+
+// --- Étoiles d'amélioration ------------------------------------------------
+
+test('une étoile améliore l’arme : dégâts, chargeur et rechargement', () => {
+  const fusil = ARMES[indiceArme('fusil')];
+  assert.equal(armeAmelioree(fusil, 0), fusil);
+  const n3 = armeAmelioree(fusil, 3);
+  assert.ok(Math.abs(n3.degats - fusil.degats * 1.75) < 1e-9);
+  assert.equal(n3.chargeur, Math.round(fusil.chargeur * 1.6));
+  assert.ok(n3.rechargement < fusil.rechargement * 0.7);
+  assert.equal(armeAmelioree(fusil, 9).niveau, ETOILES.niveauMax);
+});
+
+test('les zombies lâchent parfois une étoile ; on la ramasse en marchant dessus', () => {
+  const { sim, s, d, j } = duel();
+  s.monstres = [];
+  // Assez de rôdeurs abattus : au moins une étoile tombe.
+  for (let i = 0; i < 200 && !s.etoiles.length; i++) sim.toucher(seul(sim, 'rodeur', 5, 5).id, 999);
+  assert.ok(s.etoiles.length > 0);
+  const [e] = s.etoiles;
+  assert.ok(Math.hypot(e.x - 5, e.z - 5) < 1);
+  pendant(sim, 0.3, j);
+  assert.equal(s.etoiles.length, 1, 'personne dessus');
+  j.set(d, { x: e.x + 0.5, z: e.z, r: 0, ar: 0 });
+  pendant(sim, 0.1, j);
+  assert.equal(s.etoiles.length, 0);
+  assert.deepEqual(s.comptes[d].niveaux, [1, 0, 0, 0]);
+  assert.deepEqual(sim.instantane().jo[d][2], [1, 0, 0, 0]);
+});
+
+test('arme déjà au plus haut : l’étoile va à une autre arme, sinon elle rapporte une prime', () => {
+  const { sim, s, d, j } = duel();
+  s.monstres = [];
+  s.comptes[d] = { argent: 0, armes: 0b11, niveaux: [ETOILES.niveauMax, 0, 0, 0] };
+  const deposer = () => s.etoiles.push({ id: s.prochaineEtoile++, x: -20, z: 20, age: 0 });
+  deposer();
+  pendant(sim, 0.1, j);
+  assert.deepEqual(s.comptes[d].niveaux, [3, 1, 0, 0], 'l’Uzi en profite');
+  s.comptes[d].niveaux = [3, 3, 0, 0];
+  deposer();
+  pendant(sim, 0.1, j);
+  assert.equal(s.comptes[d].argent, ETOILES.prime, 'fusil et lance-grenades pas achetés : prime');
+});
+
+test('une étoile dans l’eau glisse jusqu’à la terre ; elle s’éteint au bout de 30 s', () => {
+  const sim = lancer();
+  const s = sim.etat;
+  s.monstres = [];
+  s.cumul = -1e9;
+  const boss = seul(sim, 'boss', 60, 0);
+  sim.toucher(boss.id, 999999);
+  assert.equal(s.etoiles.length, ETOILES.boss, 'le boss en lâche trois');
+  for (const e of s.etoiles) assert.ok(estPraticable(e.x, e.z), `étoile en (${e.x.toFixed(1)}, ${e.z.toFixed(1)})`);
+  pendant(sim, ETOILES.duree + 0.2, joueurs());
+  assert.equal(s.etoiles.length, 0);
+});
+
+// --- Lanterne ----------------------------------------------------------------
+
+test('la lanterne s’améliore à l’armurerie, pour toute l’équipe, trois fois au plus', () => {
+  const sim = lancer(['a', 'b']);
+  const s = sim.etat;
+  const d = s.protege === 'a' ? 'b' : 'a';
+  const auComptoir = joueurs({ [d]: { x: BOUTIQUE.x, z: BOUTIQUE.z, r: 0 }, [s.protege]: { x: BOUTIQUE.x, z: BOUTIQUE.z, r: 0 } });
+  assert.ok(!sim.ameliorerLanterne(d, auComptoir), 'pas d’argent');
+  s.comptes[d] = { argent: 5000, armes: 1, niveaux: [0, 0, 0, 0] };
+  assert.ok(!sim.ameliorerLanterne(d, joueurs({ [d]: { x: 0, z: 0, r: 0 } })), 'loin du comptoir');
+  s.comptes[s.protege] = { argent: 5000, armes: 1, niveaux: [0, 0, 0, 0] };
+  assert.ok(!sim.ameliorerLanterne(s.protege, auComptoir), 'le protégé est ligoté');
+  for (let n = 0; n < NIVEAU_LANTERNE_MAX; n++) assert.ok(sim.ameliorerLanterne(d, auComptoir));
+  assert.ok(!sim.ameliorerLanterne(d, auComptoir), 'déjà au plus haut');
+  assert.equal(s.comptes[d].argent, 5000 - LANTERNE.prix.reduce((a, b) => a + b));
+  assert.equal(sim.instantane().la, NIVEAU_LANTERNE_MAX);
+  assert.ok(LANTERNE.brouillard.every((v, i, t) => i === 0 || v > t[i - 1]), 'chaque niveau fait voir plus loin');
+});
+
+test('lanterne, étoiles et blessures passent d’un hôte à l’autre, vérifiées', () => {
+  const { sim, s, d, j } = duel();
+  pendant(sim, 0.7, j);
+  s.lanterne = 2;
+  s.etoiles.push({ id: 4, x: 1, z: 2, age: 3 });
+  const inst = JSON.parse(JSON.stringify(sim.instantane()));
+  const repris = creerSimulation();
+  assert.ok(repris.charger(inst));
+  assert.deepEqual(repris.instantane(), sim.instantane());
+  assert.equal(repris.etat.vies[d].coups, 1);
+  const n = normaliserMonde({ ph: 'manche', la: 42, et: [[1, 0, 0, -3], ['x', 1, 1]], vi: { a: [9, 1, 7], b: 'rien' } });
+  assert.equal(n.lanterne, NIVEAU_LANTERNE_MAX);
+  assert.deepEqual(n.etoiles, [{ id: 1, x: 0, z: 0, age: 0 }]);
+  assert.deepEqual(n.vies, { a: { coups: JOUEUR.coups, terre: true, releve: 1 } });
 });

@@ -86,9 +86,12 @@
       <p id="illumination" class="illumination" hidden></p>
 
       <div id="equipement" class="equipement" hidden>
-        <div class="bourse">
-          <span id="gain" class="gain" hidden></span>
-          <strong id="argent">0 $</strong>
+        <div class="ligne-equipement">
+          <div class="bourse">
+            <span id="gain" class="gain" hidden></span>
+            <strong id="argent">0 $</strong>
+          </div>
+          <div id="vies" class="vies" hidden aria-label="Coups encaissables"><i></i><i></i></div>
         </div>
         <div id="barre-armes" class="barre-armes"></div>
       </div>
@@ -105,6 +108,12 @@
 
       <div id="viseur" class="viseur" hidden><i></i><i></i><i></i><i></i></div>
       <div id="recharge" class="recharge" hidden><span></span></div>
+      <div id="releve" class="recharge releve" hidden><span></span></div>
+      <div id="terre" class="terre" hidden>
+        <strong>À terre !</strong>
+        <span id="terre-texte"></span>
+        <div class="jauge-terre"><span></span></div>
+      </div>
       <div id="munitions" class="munitions" hidden>
         <span id="munitions-nom" class="munitions-nom"></span>
         <strong id="munitions-chargeur"></strong>

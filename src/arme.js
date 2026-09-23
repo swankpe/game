@@ -198,7 +198,9 @@ export function creerArme(scene, camera) {
       v.chargeur.visible = true;
     }
   }
-  vues.pistolet.groupe.visible = true;
+  // Rien en main tant qu'on n'est pas en jeu (écran de création compris) :
+  // mettreAJour montre l'arme équipée.
+  vues.pistolet.groupe.visible = false;
   const tampon = new THREE.Vector3();
 
   return {

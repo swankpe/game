@@ -44,8 +44,9 @@
 
       <p id="erreur" class="erreur" role="alert" hidden></p>
       <p id="attente" class="note" hidden>Connexion au salon…</p>
-      <p id="mode-local" class="note" hidden>
-        Mode local : Supabase n'est pas configuré, le salon ne relie que les onglets de ce navigateur.
+      <p id="mode-local" class="alerte-local" hidden>
+        Mode local : Supabase n'est pas configuré. Le salon ne relie que les onglets de ce
+        navigateur ; un ami sur un autre ordinateur ne pourra pas te rejoindre.
       </p>
     </main>
 
@@ -58,6 +59,10 @@
         </div>
         <ul id="joueurs"></ul>
         <p class="compteur"><span id="nb-joueurs">1</span>/<span id="nb-max">4</span> joueurs</p>
+        <p id="salon-local" class="alerte-local" hidden>
+          Mode local : ce lien ne marche que dans ce navigateur. Pour jouer à distance, ajoute les
+          variables Supabase sur Vercel puis redéploie.
+        </p>
       </div>
       <div class="boutons-hud">
         <button id="modifier" type="button" class="carte">Modifier mon perso</button>

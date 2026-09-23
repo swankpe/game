@@ -174,8 +174,10 @@ function genererDecor() {
   const torches = [
     { x: CABANE.x + CABANE.profondeur / 2 + 0.9, z: CABANE.z - CABANE.largeur / 2 - 0.4 },
     { x: CABANE.x + CABANE.profondeur / 2 + 0.9, z: CABANE.z + CABANE.largeur / 2 + 0.4 },
-    { x: PONTON.x0 - 0.4, z: PONTON.z - PONTON.largeur / 2 - 0.5 },
-    { x: PONTON.x0 - 0.4, z: PONTON.z + PONTON.largeur / 2 + 0.5 },
+    // Au ponton, un peu en avant : la caméra de l'écran de création se tient
+    // à son entrée, les torches ne doivent pas lui boucher la vue.
+    { x: PONTON.x0 + 2.5, z: PONTON.z - PONTON.largeur / 2 - 0.5 },
+    { x: PONTON.x0 + 2.5, z: PONTON.z + PONTON.largeur / 2 + 0.5 },
   ];
   for (const angle of [1.9, 4.4]) {
     for (let t = 0.66; t < 0.8; t += 0.03) {

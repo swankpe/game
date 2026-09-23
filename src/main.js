@@ -209,7 +209,10 @@ if (new URLSearchParams(location.search).has('debug')) {
 }
 
 const transport = await choisirTransport();
-if (transport.mode === 'local') $('mode-local').hidden = false;
+if (transport.mode === 'local') {
+  $('mode-local').hidden = false;
+  $('salon-local').hidden = false;
+}
 
 // --- Salon -----------------------------------------------------------------
 
@@ -359,7 +362,9 @@ $('copier').addEventListener('click', async () => {
   const lien = `${location.origin}${location.pathname}?salon=${codeSalon}`;
   try {
     await navigator.clipboard.writeText(lien);
-    notifier('Lien copié : envoie-le à tes amis.');
+    notifier(transport.mode === 'local'
+      ? 'Lien copié, mais en mode local il ne marche que dans ce navigateur.'
+      : 'Lien copié : envoie-le à tes amis.');
   } catch {
     prompt('Copie ce lien et envoie-le à tes amis :', lien);
   }

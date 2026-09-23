@@ -227,6 +227,10 @@ Pièges :
 - Supabase : redéclarer la présence (`track`) à chaque `SUBSCRIBED`.
   `realtime: { worker: true }` garde la connexion quand l'onglet est en
   arrière-plan.
+- Sans `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`, le jeu passe **sans
+  bruit** en mode local (`BroadcastChannel`) : tout marche sur un seul poste,
+  et l'ami qui ouvre le lien se retrouve seul dans « son » salon. D'où le
+  bandeau orange `#mode-local` / `#salon-local`, à garder bien visible.
 - Variables `VITE_` : intégrées au build. Sur Vercel, une variable ajoutée
   après coup demande un redéploiement ; et la protection doit être
   « Standard Protection », sinon les amis tombent sur une connexion Vercel.

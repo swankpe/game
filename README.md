@@ -210,6 +210,20 @@ canaux privés dans les réglages du projet, rouvre l'accès public.
 Pour jouer en ligne depuis ton poste, copie `.env.example` en `.env.local` et
 remplis les deux valeurs.
 
+### Ton ami ne te rejoint pas ?
+
+- **Un bandeau orange « Mode local » s'affiche** (accueil et carte du salon) :
+  les deux variables Supabase manquent dans ce déploiement. Le jeu marche
+  alors entre les onglets de ton navigateur, mais pas entre deux ordinateurs :
+  ton ami se retrouve seul dans un salon qui porte le même code. Ajoute les
+  variables (étape 2 ci-dessus), puis redéploie (*Deployments → ⋯ →
+  Redeploy*).
+- **Ton ami tombe sur une page de connexion Vercel** : tu lui as envoyé
+  l'adresse d'un aperçu, ou la protection est sur « All Deployments ».
+  Envoie l'adresse de production (*Settings → Domains*).
+- **« Connexion perdue »** : le projet Supabase gratuit s'est peut-être mis
+  en pause (voir plus bas).
+
 ## Bon à savoir
 
 - **Tout est dessiné par le code** : pas un modèle 3D, pas une texture, pas un

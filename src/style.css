@@ -284,6 +284,19 @@ button:disabled {
   font-size: 14px;
 }
 
+/* Sans Supabase, le jeu ne traverse pas Internet : on ne doit pas le rater. */
+.alerte-local {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  max-width: 300px;
+  border-radius: 12px;
+  background: #fde2c8;
+  color: #8a3a12;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 /* Interface en jeu */
 
 .carte {

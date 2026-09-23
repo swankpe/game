@@ -20,7 +20,9 @@ franches, personnages à tête de cacahuète et yeux globuleux.
 - **Aucun serveur de jeu.** Pas de fonction Vercel, pas de table Supabase. Un
   salon = un canal Realtime `salon:CODE`.
 - L'équilibrage (durées, dégâts, cadence d'apparition…) tient dans
-  `src/regles.js`, et nulle part ailleurs.
+  `src/regles.js`, et nulle part ailleurs. Les réglages d'essai (`ESSAI` :
+  manches courtes, boss fragile, argent au départ) y sont aussi : `jeu.js` les
+  passe à la simulation de l'hôte, les tests vérifient le jeu normal.
 
 ## Qui décide quoi
 

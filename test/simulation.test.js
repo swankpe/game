@@ -308,7 +308,8 @@ test('une manche gagnée rapporte un bonus à tous ; une nouvelle partie remet l
   assert.equal(sim.etat.phase, 'attente');
   assert.equal(sim.etat.comptes.a.armes, 3);
   assert.ok(sim.demarrer());
-  assert.deepEqual(sim.etat.comptes, {});
+  const neuf = { argent: 0, armes: ARMES_DEPART, niveaux: [0, 0, 0, 0] };
+  assert.deepEqual(sim.etat.comptes, { a: neuf, b: neuf });
 });
 
 test("argent et armes survivent au départ de l'hôte", () => {
@@ -890,4 +891,22 @@ test('le poteau porté ne dégringole pas du bord d’une rampe', () => {
   sim.poser(d);
   Object.assign(s.poteau, { x: 3.5, z: 0 });
   assert.ok(!sim.demanderPorter(d, joueurs({ [d]: { x: 5.2, z: 0, r: 0 } })));
+});
+
+test('réglages d’essai : manche courte, boss fragile, argent au départ', () => {
+  const sim = creerSimulation({ aleatoire: graine(9), dureeManche: 120, facteurPvBoss: 0.1, argentDepart: 10000, dureePreparation: 0 });
+  sim.definirMembres(membres('a'));
+  sim.demarrer();
+  const s = sim.etat;
+  assert.equal(s.reste, 120);
+  assert.equal(s.comptes.a.argent, 10000, 'dans la poche dès le départ');
+  assert.deepEqual(sim.instantane().jo.a, [10000, ARMES_DEPART, [0, 0, 0, 0]]);
+  sim.definirMembres(membres('a', 'b'));
+  assert.equal(s.comptes.b.argent, 10000, 'arrivé en cours de partie');
+  for (let t = 0; t < 119.9; t += 0.1) avancerDefendu(sim, 0.1);
+  assert.equal(s.boss, null, 'pas avant la fin des deux minutes');
+  const boss = jusquAuBoss(sim);
+  assert.equal(boss.pv, Math.round(pvBoss(1, 2) * 0.1), 'deux défenseurs, un dixième des points de vie');
+  // La cadence monte jusqu'au bout de la manche courte.
+  assert.ok(monstresParMinute(1, 120, 120) > monstresParMinute(1, 0, 120) * 2);
 });

@@ -129,6 +129,10 @@ en courant et en sautant : les quatre traits du viseur montrent l'écart réel
 du prochain tir. Tous les réglages (prix, dégâts, cadence, recul…) sont dans
 `src/regles.js`.
 
+> **Mode essai en cours** : manches de 2 minutes, boss à un dixième de ses
+> points de vie, 10 000 $ au départ de chaque partie. Pour revenir au jeu
+> normal : `actif: false` dans `ESSAI`, en haut de `src/regles.js`.
+
 ## Jouer
 
 1. Crée ton perso (le camp est en plein jour), puis **Créer un salon**.

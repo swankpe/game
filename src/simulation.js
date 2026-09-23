@@ -72,9 +72,16 @@ function etatInitial() {
 const DEGATS_MAX = Math.max(...ARMES.map((a) => a.degats * 2)) * BONUS_DEGATS_MAX;
 const niveauxVides = () => ARMES.map(() => 0);
 
-// apparitionBoss : secondes de manche avant le boss (BOSS.apparition par
-// défaut) ; dureePreparation : 0 pour passer directement à la manche.
-export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS.apparition, dureePreparation = DUREE_PREPARATION } = {}) {
+// Options (le jeu normal par défaut ; jeu.js y met les réglages d'essai) :
+// dureeManche ; apparitionBoss : secondes de manche avant le boss (à la fin du
+// chrono par défaut) ; dureePreparation : 0 pour passer directement à la
+// manche ; facteurPvBoss : part des points de vie du boss ; argentDepart :
+// argent de chacun en début de partie.
+export function creerSimulation({
+  aleatoire = Math.random, dureeManche = DUREE_MANCHE, apparitionBoss = null, dureePreparation = DUREE_PREPARATION,
+  facteurPvBoss = 1, argentDepart = 0,
+} = {}) {
+  const quandBoss = apparitionBoss ?? dureeManche;
   let s = etatInitial();
   let membres = [];
   let roleSolo = 'defenseur';
@@ -83,7 +90,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
   let joueursConnus = new Map();
 
   const carte = () => CARTES[s.carte] ?? CARTES[0];
-  const compte = (id) => (s.comptes[id] ??= { argent: 0, armes: ARMES_DEPART, niveaux: niveauxVides() });
+  const compte = (id) => (s.comptes[id] ??= { argent: argentDepart, armes: ARMES_DEPART, niveaux: niveauxVides() });
   const vie = (id) => (s.vies[id] ??= { coups: 0, terre: false, releve: 0, repit: 0, calme: 0, seul: 0 });
   const estMembre = (id) => membres.some((j) => j.id === id);
   // Défenseurs debout, présents sur l'île : les cibles des zombies.
@@ -113,7 +120,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
 
   function apparaitre() {
     const { x, z } = pointDeSortie();
-    let k = tirerType(poidsTypes(s.manche, DUREE_MANCHE - s.reste), aleatoire());
+    let k = tirerType(poidsTypes(s.manche, dureeManche - s.reste, dureeManche), aleatoire());
     const { max } = TYPES_ZOMBIES[k];
     if (max && s.monstres.filter((m) => m.k === k).length >= max) k = 0;
     ajouterMonstre(k, x, z);
@@ -125,7 +132,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
   function appelerBoss() {
     const { x, z } = pointDeSortie({ large: 1.3, essais: 12, assezLoin: Infinity });
     const defenseurs = membres.filter((m) => m.id !== s.protege).length;
-    const pvMax = pvBoss(s.manche, defenseurs);
+    const pvMax = Math.max(1, Math.round(pvBoss(s.manche, defenseurs) * facteurPvBoss));
     const m = ajouterMonstre(K_BOSS, x, z, pvMax);
     m.v = TYPES_ZOMBIES[K_BOSS].vitesse;
     s.boss = { id: m.id, pvMax, cris: 0, invocation: BOSS.premiereInvocation, enrage: false };
@@ -303,7 +310,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
   function commencerManche() {
     s.prets = [];
     s.phase = 'manche';
-    s.reste = DUREE_MANCHE;
+    s.reste = dureeManche;
     s.pv = PV_PROTEGE;
     s.monstres = [];
     s.boss = null;
@@ -458,6 +465,8 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       // Protégé parti en cours de manche : le mannequin prend sa place.
       if (s.protege && !ids.has(s.protege)) s.protege = null;
       if (s.poteau.porteur && !ids.has(s.poteau.porteur)) s.poteau.porteur = null;
+      // Arrivé en cours de partie : son compte est ouvert tout de suite.
+      if (s.phase !== 'attente') for (const m of liste) compte(m.id);
     },
 
     demarrer() {
@@ -469,6 +478,8 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       s.prochaineExplosion = prochaineExplosion;
       s.prochaineEtoile = prochaineEtoile;
       s.manche = 1;
+      // Chacun a son compte dès le départ (argentDepart en poche).
+      for (const m of membres) compte(m.id);
       s.protege = tirerProtege(membres, { aleatoire, roleSolo });
       s.precedent = s.protege;
       commencerPreparation();
@@ -501,9 +512,9 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
 
       if (s.phase === 'manche') {
         s.reste = Math.max(0, s.reste - dt);
-        const ecoule = DUREE_MANCHE - s.reste;
+        const ecoule = dureeManche - s.reste;
         // Pendant le combat contre le boss, la horde ralentit sans s'arrêter.
-        const cadence = s.boss ? monstresParMinute(s.manche, 0) * BOSS.apparitions : monstresParMinute(s.manche, ecoule);
+        const cadence = s.boss ? monstresParMinute(s.manche, 0) * BOSS.apparitions : monstresParMinute(s.manche, ecoule, dureeManche);
         s.cumul += (cadence / 60) * dt;
         while (s.cumul >= 1) {
           s.cumul -= 1;
@@ -525,7 +536,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
           s.reste = DUREE_DEFAITE;
           s.poteau.porteur = null;
           s.releves = {};
-        } else if (!s.boss && DUREE_MANCHE - s.reste >= apparitionBoss) {
+        } else if (!s.boss && ecoule >= quandBoss) {
           // L'heure du boss : il sort de la mer ; sa mort gagne la manche.
           appelerBoss();
         } else if (s.boss && !bossEnJeu()) {

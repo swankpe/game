@@ -14,7 +14,7 @@ import { creerMusique } from './musique.js';
 import { HAUTEUR_LANTERNE, creerPoteau } from './poteau.js';
 import { creerProjectiles } from './projectiles.js';
 import {
-  ARMES, ARMES_DEPART, BONUS_DEGATS_MAX, BONUS_MANCHE, BOSS, DISPERSION_MOUVEMENT, DISPERSION_SAUT, DISTANCE_BOUTIQUE,
+  ARMES, ARMES_DEPART, BONUS_DEGATS_MAX, BONUS_MANCHE, BOSS, ESSAI, DISPERSION_MOUVEMENT, DISPERSION_SAUT, DISTANCE_BOUTIQUE,
   DISTANCE_PORTER, ETOILES, EXPLOSION_BOUFFI, JOUEUR, LANTERNE, MULTIPLICATEUR_TETE, NIVEAU_LANTERNE_MAX, POTEAU_DEPART,
   PV_PROTEGE, TYPES_ZOMBIES, armeAmelioree, degatsExplosion, indiceArme, positionPortee,
 } from './regles.js';
@@ -73,6 +73,12 @@ const minutes = (s) => {
 };
 const nombreValide = (v) => Number.isFinite(v) && Math.abs(v) < 1000;
 const vecteurValide = (v) => Array.isArray(v) && v.length === 3 && v.every(nombreValide);
+
+// Réglages d'essai (regles.js) passés à la simulation de l'hôte.
+function optionsSimulation() {
+  if (!ESSAI.actif) return {};
+  return { dureeManche: ESSAI.dureeManche, facteurPvBoss: ESSAI.pvBoss, argentDepart: ESSAI.argentDepart };
+}
 
 function mondeVide() {
   return {
@@ -883,9 +889,12 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       $('vie').dataset.danger = String(monde.pv < 35);
     } else {
       const seul = membres.length <= 1;
-      $('texte-lancement').textContent = seul
+      const essai = ESSAI.actif
+        ? ` Mode essai : manches de ${ESSAI.dureeManche / 60} min, boss fragile, ${ESSAI.argentDepart.toLocaleString('fr-FR')} $ au départ.`
+        : '';
+      $('texte-lancement').textContent = (seul
         ? 'Tu es seul : parfait pour tester. Choisis ton rôle.'
-        : `${membres.length} joueurs au camp. Le protégé sera tiré au sort.`;
+        : `${membres.length} joueurs au camp. Le protégé sera tiré au sort.`) + essai;
       $('role-solo').hidden = !seul;
       for (const b of document.querySelectorAll('[data-role]')) b.setAttribute('aria-pressed', String(b.dataset.role === roleSolo));
     }
@@ -1052,7 +1061,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       monId = id;
       membres = liste;
       if (estHote() && !sim) {
-        sim = creerSimulation();
+        sim = creerSimulation(optionsSimulation());
         // Nouvel hôte en cours de partie : on reprend le dernier état reçu.
         if (dernierInstantane) sim.charger(dernierInstantane);
         urgent = true;

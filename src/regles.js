@@ -2,6 +2,12 @@
 // durée ou une cadence ne demande de toucher à rien d'autre.
 
 export const DUREE_MANCHE = 300;
+
+// Réglages d'essai, pour tester vite : manches courtes, boss fragile (part de
+// ses points de vie), de l'argent au départ de chaque partie. Ils ne touchent
+// que le jeu (jeu.js les donne à la simulation) ; les tests vérifient le jeu
+// normal. actif: false pour revenir au jeu normal.
+export const ESSAI = { actif: true, dureeManche: 120, pvBoss: 0.1, argentDepart: 10000 };
 // Avant chaque manche, sur sa carte : le temps d'acheter ses armes et de
 // placer le poteau (et la lanterne) au meilleur endroit. Tout le monde prêt
 // (Entrée) : on n'attend pas la fin.
@@ -181,8 +187,8 @@ export const EXPLOSION_BOUFFI = { rayon: 3.5, degats: 80, protege: 25 };
 // Part de chaque type parmi les apparitions (poids relatifs, dans l'ordre de
 // TYPES_ZOMBIES ; le boss, sans poids, n'est jamais tiré). Les colosses attendent la deuxième minute de la première
 // manche ; les types spéciaux gagnent du terrain de manche en manche.
-export function poidsTypes(manche, ecoule) {
-  const avance = ecoule / DUREE_MANCHE;
+export function poidsTypes(manche, ecoule, duree = DUREE_MANCHE) {
+  const avance = ecoule / duree;
   const m = manche - 1;
   return [
     1,
@@ -192,16 +198,13 @@ export function poidsTypes(manche, ecoule) {
   ];
 }
 
-// Le boss de fin de manche. Au bout de apparition secondes de manche, il
-// sort de la mer : la manche n'est gagnée qu'à sa mort (le chrono, lui,
-// continue jusqu'à zéro puis s'arrête). Pendant le combat, les zombies
+// Le boss de fin de manche. Quand le chrono tombe à zéro, il sort de la
+// mer : la manche n'est gagnée qu'à sa mort. Pendant le combat, les zombies
 // continuent d'arriver (apparitions : part de la cadence de début de manche)
 // et il appelle des coureurs en renfort toutes les invocation secondes. Sous
 // la moitié de sa vie (enrage), il accélère.
 export const BOSS = {
   nom: 'Le Roi Noyé',
-  // Réglage de test : 60 s. En jeu normal : DUREE_MANCHE (fin du chrono).
-  apparition: 60,
   pv: 1500, parManche: 0.6, parDefenseur: 0.8,
   apparitions: 0.5,
   invocation: 12, premiereInvocation: 8, renforts: 3,
@@ -251,9 +254,11 @@ export const HAUTEUR_TETE = 1.55;
 
 // La cadence d'apparition monte pendant la manche (×2,5 à la fin) et d'une
 // manche à l'autre.
-export function monstresParMinute(manche, ecoule) {
+// duree : longueur de la manche (plus courte en essai), pour que la montée
+// aille toujours jusqu'au bout.
+export function monstresParMinute(manche, ecoule, duree = DUREE_MANCHE) {
   const base = 18 + 8 * (manche - 1);
-  return base * (1 + (1.5 * ecoule) / DUREE_MANCHE);
+  return base * (1 + (1.5 * ecoule) / duree);
 }
 
 export function vitesseMonstre(manche) {

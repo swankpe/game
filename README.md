@@ -5,20 +5,42 @@ un poteau, sert de lanterne à l'équipe ; les trois autres le défendent contre
 des vagues de zombies qui sortent de la mer. Rien à installer : on s'envoie un
 lien.
 
-## Règles (premier brouillon)
+## Règles
 
 - **4 joueurs** : 1 protégé, 3 défenseurs. Le protégé est tiré au sort à
   chaque manche.
-- **Manche de 5 minutes**, de plus en plus de zombies d'une manche à l'autre.
-  Survivre jusqu'au bout gagne la manche ; si le protégé meurt, c'est la défaite
-  et tout le monde retourne au camp.
+- **Manche de 5 minutes**. Les zombies arrivent de plus en plus vite pendant
+  la manche (2,5 fois plus à la fin qu'au début), et chaque manche en amène
+  davantage, plus rapides et plus résistants ; certains courent. Survivre
+  jusqu'au bout gagne la manche ; si le protégé meurt, c'est la défaite et tout
+  le monde retourne au camp.
 - **La nuit**, on ne voit bien que ce qu'éclaire la lanterne du protégé.
 - **Le protégé** ne bouge pas : il dirige la lanterne avec la souris.
   **F** lance l'**Illumination** : toute l'île éclairée pendant 30 secondes,
   puis 3 minutes de recharge.
-- **Les défenseurs** tirent au pistolet (3 balles par zombie, 2 dans la tête)
-  et peuvent **porter le poteau** (**E**) pour le déplacer, avec le protégé
-  dessus. En portant, on ne tire pas et on avance moins vite.
+- **Les défenseurs** tirent et peuvent **porter le poteau** (**E**) pour le
+  déplacer, avec le protégé dessus. En portant, on ne tire pas et on avance
+  moins vite.
+
+### Argent et armurerie
+
+Chaque zombie tué rapporte **10 $** à celui qui l'a abattu, et chaque manche
+gagnée **150 $** à tout le monde. L'argent repart à zéro à chaque nouvelle
+partie.
+
+L'**armurerie** est la cabane éclairée à l'ouest de l'île : approche-toi du
+comptoir et appuie sur **E**. Aller acheter, c'est laisser le poteau sans toi
+quelques instants.
+
+| Arme | Prix | En deux mots |
+| --- | --- | --- |
+| Pistolet | offert | précis ; 3 balles par zombie, 2 dans la tête |
+| Mini Uzi | 250 $ | rafale très rapide, dispersion de loin |
+| Fusil d'assaut | 600 $ | puissant et précis |
+| Lance-grenades | 1 200 $ | explose au contact, dégâts de zone |
+
+Munitions illimitées. Tous les réglages (prix, dégâts, cadence…) sont dans
+`src/regles.js`.
 
 ## Jouer
 
@@ -36,8 +58,9 @@ la lanterne et l'Illumination.
 | clic sur la scène | prendre la souris (Échap pour la libérer) |
 | ZQSD (AZERTY) ou WASD (QWERTY) | marcher |
 | souris | viser / diriger la lanterne |
-| clic gauche | tirer |
-| E | porter / poser le poteau |
+| clic gauche (maintenu) | tirer |
+| 1 à 4, molette | changer d'arme |
+| E | porter / poser le poteau, ouvrir l'armurerie |
 | F | Illumination (protégé) |
 | Maj | courir |
 | Espace | sauter |
@@ -98,8 +121,9 @@ remplis les deux valeurs.
   activité. Si le salon ne se connecte plus, réactive le projet depuis le
   tableau de bord Supabase.
 - **Quota de messages :** pendant une manche, l'hôte envoie l'état du monde
-  6 fois par seconde et chaque joueur sa position jusqu'à 10 fois par seconde.
-  Une manche à 4 représente quelques dizaines de milliers de messages ; le
-  quota gratuit de Supabase est mensuel, surveille l'onglet *Usage*.
+  6 fois par seconde, chaque joueur sa position jusqu'à 10 fois par seconde et
+  ses tirs par paquets de 100 ms. Une manche à 4 représente quelques dizaines
+  de milliers de messages ; le quota gratuit de Supabase est mensuel, surveille
+  l'onglet *Usage*.
 - **Accès :** qui connaît le code peut entrer (environ 920 000 codes
   possibles). Suffisant entre amis, ce n'est pas un contrôle d'accès.

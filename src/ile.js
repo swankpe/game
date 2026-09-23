@@ -2,6 +2,7 @@
 // palmes, rochers, herbes…) : quelques appels de dessin au lieu de centaines.
 
 import * as THREE from 'three';
+import { creerModeleArme } from './armes.js';
 import { colorer, fusionner, hachage, place } from './geometrie.js';
 import { CABANE, DECOR, PONTON, estHerbe, hauteurTerrain } from './monde.js';
 
@@ -232,16 +233,29 @@ function creerCabane() {
   const pignon = new THREE.ExtrudeGeometry(forme, { depth: 0.1, bevelEnabled: false });
   parties.push(colorer(place(pignon, { x: avant - 0.05, y: y + hMur, z: cz, ry: Math.PI / 2 }), TEINTES.planches[0]));
 
-  // Bouées et marchandises accrochées au comptoir.
-  for (const [i, couleur] of ['#f07c1e', '#d8443a', '#f2c230', '#3d7fd1'].entries()) {
-    const z = cz - 1.6 + i * 1.05;
-    parties.push(colorer(place(new THREE.TorusGeometry(0.2, 0.07, 5, 8), { x: arriere + 0.1, y: y + 1.7, z, ry: Math.PI / 2 }), couleur));
-    parties.push(colorer(place(new THREE.BoxGeometry(0.22, 0.26, 0.22), { x: avant + 0.1, y: y + 1.25, z: z + 0.3 }), i % 2 ? '#e9e4d8' : '#c9a227'));
+  // Caisses de munitions sur le comptoir, râtelier au mur du fond.
+  for (const [i, dz] of [-1.7, -1.05, 1.3].entries()) {
+    parties.push(colorer(place(new THREE.BoxGeometry(0.34, 0.2, 0.26), { x: avant + 0.1, y: y + 1.22, z: cz + dz, ry: i * 0.2 }), '#4f5a34'));
+    parties.push(colorer(place(new THREE.BoxGeometry(0.345, 0.04, 0.265), { x: avant + 0.1, y: y + 1.24, z: cz + dz, ry: i * 0.2 }), '#c9a227'));
   }
+  bloc(0.06, 1.2, largeur - 0.6, TEINTES.boisSombre, { x: arriere + 0.1, y: y + 1.45, z: cz });
 
   const groupe = new THREE.Group();
   groupe.add(fusionner(parties));
   groupe.add(creerEnseigne(avant + 0.14, y + hMur + 0.35, cz));
+  // Les armes en vente, accrochées de profil au râtelier.
+  for (const [id, hauteur, dz] of [['fusil', 1.85, -0.2], ['lance', 1.35, -0.6], ['uzi', 1.35, 1.1]]) {
+    const arme = creerModeleArme(id);
+    arme.position.set(arriere + 0.2, y + hauteur, cz + dz);
+    arme.scale.setScalar(1.3);
+    groupe.add(arme);
+  }
+  // Une lampe au-dessus du comptoir : on retrouve l'armurerie dans le noir.
+  const ampoule = new THREE.Mesh(new THREE.IcosahedronGeometry(0.08, 1), new THREE.MeshBasicMaterial({ color: '#ffd98a' }));
+  ampoule.position.set(avant + 0.25, y + hMur - 0.3, cz);
+  const lampe = new THREE.PointLight('#ffcf85', 9, 11, 1.5);
+  lampe.position.copy(ampoule.position);
+  groupe.add(ampoule, lampe);
   return groupe;
 }
 
@@ -256,10 +270,10 @@ function creerEnseigne(x, y, z) {
   ctx.lineWidth = 8;
   ctx.strokeRect(10, 10, 492, 108);
   ctx.fillStyle = '#f7f1e3';
-  ctx.font = 'bold 64px "Fredoka", system-ui, sans-serif';
+  ctx.font = 'bold 60px "Fredoka", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('APPÂTS', 256, 68);
+  ctx.fillText('ARMURERIE', 256, 68);
   const texture = new THREE.CanvasTexture(toile);
   texture.colorSpace = THREE.SRGBColorSpace;
   const enseigne = new THREE.Mesh(

@@ -4,15 +4,18 @@
 // monde ; les autres l'affichent et envoient leurs actions.
 
 import * as THREE from 'three';
+import { genererApercus } from './apercus.js';
 import { creerArme } from './arme.js';
-import { hauteurSol, hauteurTerrain } from './monde.js';
+import { BOUTIQUE, hauteurSol, hauteurTerrain } from './monde.js';
 import { creerMonstresVue } from './monstres.js';
 import { HAUTEUR_LANTERNE, creerPoteau } from './poteau.js';
+import { creerProjectiles } from './projectiles.js';
 import {
-  CADENCE_TIR, DEGATS_TIR, DISTANCE_PORTER, MULTIPLICATEUR_TETE, PORTEE_TIR, POTEAU_DEPART, PV_PROTEGE, positionPortee,
+  ARMES, ARMES_DEPART, BONUS_MANCHE, DISTANCE_BOUTIQUE, DISTANCE_PORTER, MULTIPLICATEUR_TETE, POTEAU_DEPART,
+  PV_PROTEGE, RECOMPENSE_ZOMBIE, degatsExplosion, indiceArme, positionPortee,
 } from './regles.js';
 import { creerSimulation, normaliserMonde } from './simulation.js';
-import { sonMort, sonTir, sonTouche } from './sons.js';
+import { sonCaisse, sonExplosion, sonMort, sonTir, sonTouche } from './sons.js';
 import { creerVue } from './vue.js';
 
 const HAUTEUR_YEUX = 1.62;
@@ -23,6 +26,12 @@ const INTERVALLE_MONDE_CALME = 1;
 const INTERVALLE_ETAT = 0.1;
 const BATTEMENT_ETAT = 4;
 const PORTEE_MANNEQUIN = 32;
+// Les tirs partent en paquets : un Uzi tire 14 balles par seconde, un message
+// par balle épuiserait vite le quota de Supabase.
+const INTERVALLE_TIRS = 0.1;
+const TIRS_MAX = 24;
+const DEGATS_BALLE_MAX = Math.max(...ARMES.filter((a) => !a.projectile).map((a) => a.degats)) * MULTIPLICATEUR_TETE;
+const GRENADE = ARMES[indiceArme('lance')];
 
 const $ = (id) => document.getElementById(id);
 const arrondi = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
@@ -42,7 +51,7 @@ function mondeVide() {
   return {
     phase: 'attente', manche: 0, reste: 0, pv: PV_PROTEGE, protege: null,
     poteau: { x: POTEAU_DEPART.x, z: POTEAU_DEPART.z, porteur: null },
-    illumination: 0, recharge: 0, tues: 0, monstres: [],
+    illumination: 0, recharge: 0, tues: 0, monstres: [], comptes: {},
   };
 }
 
@@ -54,12 +63,14 @@ function distanceSol(o, d, max) {
   return null;
 }
 
-export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars, envoyer }) {
+export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, avatars, envoyer }) {
   scene.add(camera);
   const vue = creerVue(canvas);
   const arme = creerArme(scene, camera);
   const monstres = creerMonstresVue(scene);
   const poteau = creerPoteau(scene);
+  const projectiles = creerProjectiles(scene);
+  const apercus = genererApercus(rendu, ARMES.map((a) => a.id));
 
   let monId = null;
   let membres = [];
@@ -80,11 +91,52 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
   let annonceFin = 0;
   let marqueurFin = 0;
   let degats = 0;
+  let armeEquipee = 'pistolet';
+  let tirsEnAttente = [];
+  let prochainEnvoiTirs = 0;
+  // Tirs reçus en paquet, rejoués étalés sur l'intervalle d'envoi.
+  let tirsDifferes = [];
+  let boutiqueOuverte = false;
+  let argentPrecedent = 0;
+  let armesPrecedentes = ARMES_DEPART;
+  let gainFin = 0;
+  let infoTexte = '';
+  let infoFin = 0;
+  let secousse = 0;
 
   const estHote = () => membres.length > 0 && membres[0].id === monId;
   const nomDe = (id) => membres.find((m) => m.id === id)?.nom ?? 'Quelqu’un';
   const role = () => (monde.phase === 'attente' ? 'libre' : monde.protege === monId ? 'protege' : 'defenseur');
   const jePorte = () => monde.poteau.porteur === monId;
+  const monCompte = () => monde.comptes?.[monId] ?? { argent: 0, armes: ARMES_DEPART };
+  const possede = (id) => (monCompte().armes & (1 << indiceArme(id))) !== 0;
+  const pretBoutique = () => {
+    const e = joueur.etat;
+    return role() !== 'protege' && !jePorte() && Math.hypot(e.x - BOUTIQUE.x, e.z - BOUTIQUE.z) <= DISTANCE_BOUTIQUE;
+  };
+
+  function informer(texte, duree = 1.8) {
+    infoTexte = texte;
+    infoFin = horloge + duree;
+  }
+
+  function equiper(id) {
+    if (!possede(id)) {
+      const a = ARMES[indiceArme(id)];
+      informer(`${a.nom} : à acheter à l’armurerie (${a.prix} $)`);
+      return;
+    }
+    if (armeEquipee === id) return;
+    armeEquipee = id;
+    arme.equiper(id);
+    envoyerEtat(true);
+  }
+
+  function armeSuivante(sens) {
+    const possedees = ARMES.filter((a) => possede(a.id));
+    const i = possedees.findIndex((a) => a.id === armeEquipee);
+    equiper(possedees[(i + sens + possedees.length) % possedees.length].id);
+  }
 
   function positionsJoueurs() {
     const carte = avatars.positions();
@@ -120,45 +172,210 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
     }
   }
 
+  // Direction du regard, écartée au hasard dans le cône de dispersion.
+  function directionTir(dispersion) {
+    const l = vue.etat.lacet + (Math.random() - 0.5) * 2 * dispersion;
+    const t = vue.etat.tangage + (Math.random() - 0.5) * 2 * dispersion;
+    const c = Math.cos(t);
+    return [-Math.sin(l) * c, Math.sin(t), -Math.cos(l) * c];
+  }
+
   function tirer() {
-    cadence = CADENCE_TIR;
+    const a = ARMES[indiceArme(armeEquipee)];
+    cadence = a.cadence;
+    const bouche = arme.tirer();
+    arme.eclair(bouche, a.projectile ? 1.6 : 1);
+    sonTir(1, a.id);
+    // Le recul relève le regard : il faut le corriger en rafale.
+    vue.etat.tangage = Math.min(vue.etat.tangage + a.recul, 1.45);
+    vue.etat.lacet += (Math.random() - 0.5) * a.recul * 0.6;
+
+    if (a.projectile) {
+      const d = directionTir(a.dispersion);
+      const v = new THREE.Vector3(d[0], d[1], d[2]).multiplyScalar(a.vitesse).add(new THREE.Vector3(0, 1.5, 0));
+      projectiles.lancer(bouche, v, true);
+      envoyer({ type: 'grenade', o: [bouche.x, bouche.y, bouche.z].map((x) => arrondi(x)), v: [v.x, v.y, v.z].map((x) => arrondi(x)) });
+      return;
+    }
+
     const o = camera.getWorldPosition(new THREE.Vector3());
-    const d = vue.direction();
-    const portee = distanceSol(o, d, PORTEE_TIR) ?? PORTEE_TIR;
+    const d = directionTir(a.dispersion);
+    const portee = distanceSol(o, d, a.portee) ?? a.portee;
     const touche = monstres.toucher([o.x, o.y, o.z], d, portee);
     const distance = touche ? touche.distance : portee;
     const fin = new THREE.Vector3(o.x + d[0] * distance, o.y + d[1] * distance, o.z + d[2] * distance);
-    const bouche = arme.tirer();
-    arme.eclair(bouche);
     arme.trainee(bouche, fin);
-    sonTir(1);
-    const message = { type: 'tir', o: [bouche.x, bouche.y, bouche.z].map((v) => arrondi(v)), f: [fin.x, fin.y, fin.z].map((v) => arrondi(v)) };
+    const tir = [bouche.x, bouche.y, bouche.z, fin.x, fin.y, fin.z].map((x) => arrondi(x));
     if (touche) {
-      const dg = DEGATS_TIR * (touche.tete ? MULTIPLICATEUR_TETE : 1);
+      const dg = a.degats * (touche.tete ? MULTIPLICATEUR_TETE : 1);
       monstres.secouer(touche.id);
       sonTouche(touche.tete);
       $('viseur').dataset.touche = touche.tete ? 'tete' : 'corps';
       marqueurFin = horloge + 0.15;
       if (sim) {
-        if (sim.toucher(touche.id, dg)) urgent = true;
+        if (sim.toucher(touche.id, dg, monId)) urgent = true;
       } else {
-        message.m = touche.id;
-        message.dg = dg;
+        tir.push(touche.id, dg);
       }
     }
-    envoyer(message);
+    if (tirsEnAttente.length < TIRS_MAX) tirsEnAttente.push(tir);
   }
+
+  function envoyerTirs() {
+    if (!tirsEnAttente.length || horloge < prochainEnvoiTirs) return;
+    envoyer({ type: 'tirs', ar: indiceArme(armeEquipee), l: tirsEnAttente });
+    tirsEnAttente = [];
+    prochainEnvoiTirs = horloge + INTERVALLE_TIRS;
+  }
+
+  function exploser(position, locale) {
+    arme.explosion(position, GRENADE.rayon);
+    const distance = position.distanceTo(camera.position);
+    sonExplosion(Math.max(0.15, 1 - distance / 60));
+    secousse = Math.max(secousse, 1 - distance / 18);
+    if (!locale) return;
+    // Seul le tireur compte les dégâts de sa grenade.
+    const cibles = monstres.autourDe(position, GRENADE.rayon)
+      .map(({ id, distance: d }) => [id, degatsExplosion(GRENADE, d)])
+      .filter(([, dg]) => dg > 0)
+      .slice(0, 30);
+    for (const [id] of cibles) monstres.secouer(id);
+    if (sim) {
+      for (const [id, dg] of cibles) if (sim.toucher(id, dg, monId)) urgent = true;
+    } else if (cibles.length) {
+      envoyer({ type: 'explosion', c: cibles });
+    }
+  }
+
+  // --- Armurerie -----------------------------------------------------------
+
+  const cartes = new Map();
+  function construireBoutique() {
+    const liste = $('boutique-armes');
+    const max = {
+      puissance: Math.max(...ARMES.map((a) => a.degats / a.cadence)),
+      cadence: Math.max(...ARMES.map((a) => 1 / a.cadence)),
+      portee: Math.max(...ARMES.map((a) => a.portee)),
+    };
+    for (const a of ARMES) {
+      const carte = document.createElement('article');
+      carte.className = 'arme-carte';
+      const image = document.createElement('img');
+      image.src = apercus[a.id];
+      image.alt = '';
+      const titre = document.createElement('h3');
+      titre.textContent = a.nom;
+      const texte = document.createElement('p');
+      texte.textContent = a.description;
+      const stats = document.createElement('dl');
+      for (const [nom, valeur] of [
+        ['Puissance', a.degats / a.cadence / max.puissance],
+        ['Cadence', 1 / a.cadence / max.cadence],
+        ['Précision', 1 - a.dispersion / 0.035],
+        ['Portée', a.portee / max.portee],
+      ]) {
+        const ligne = document.createElement('div');
+        const dt = document.createElement('dt');
+        dt.textContent = nom;
+        const dd = document.createElement('dd');
+        const barre = document.createElement('span');
+        barre.style.setProperty('--valeur', String(Math.max(0.08, Math.min(1, valeur))));
+        dd.append(barre);
+        ligne.append(dt, dd);
+        stats.append(ligne);
+      }
+      const bouton = document.createElement('button');
+      bouton.type = 'button';
+      bouton.className = 'principal';
+      bouton.addEventListener('click', () => acheterOuEquiper(a.id));
+      carte.append(image, titre, texte, stats, bouton);
+      liste.append(carte);
+      cartes.set(a.id, { carte, bouton });
+    }
+  }
+
+  function rafraichirBoutique() {
+    const { argent } = monCompte();
+    $('boutique-argent').textContent = `${argent} $`;
+    for (const a of ARMES) {
+      const { carte, bouton } = cartes.get(a.id);
+      const achetee = possede(a.id);
+      carte.dataset.etat = armeEquipee === a.id ? 'equipee' : achetee ? 'achetee' : argent >= a.prix ? 'abordable' : 'chere';
+      bouton.disabled = armeEquipee === a.id || (!achetee && argent < a.prix);
+      bouton.textContent = armeEquipee === a.id ? 'En main' : achetee ? 'Prendre en main' : `Acheter · ${a.prix} $`;
+    }
+  }
+
+  function acheterOuEquiper(id) {
+    if (possede(id)) {
+      equiper(id);
+    } else if (sim) {
+      if (sim.acheter(monId, id, positionsJoueurs())) urgent = true;
+    } else {
+      envoyer({ type: 'acheter', arme: id });
+    }
+  }
+
+  function ouvrirBoutique() {
+    boutiqueOuverte = true;
+    vue.activer(false);
+    $('boutique').hidden = false;
+    rafraichirBoutique();
+  }
+
+  function fermerBoutique() {
+    if (!boutiqueOuverte) return;
+    boutiqueOuverte = false;
+    $('boutique').hidden = true;
+    if (fps) vue.activer(true);
+  }
+
+  construireBoutique();
+  $('boutique-regle').textContent = `${RECOMPENSE_ZOMBIE} $ par zombie, ${BONUS_MANCHE} $ par manche gagnée`;
+  $('boutique-fermer').addEventListener('click', fermerBoutique);
+
+  // Barre des armes, en bas à droite.
+  const cases = new Map();
+  for (const [i, a] of ARMES.entries()) {
+    const c = document.createElement('button');
+    c.type = 'button';
+    c.className = 'case-arme';
+    const image = document.createElement('img');
+    image.src = apercus[a.id];
+    image.alt = a.nom;
+    const touche = document.createElement('span');
+    touche.className = 'touche';
+    touche.textContent = String(i + 1);
+    const prix = document.createElement('span');
+    prix.className = 'prix';
+    prix.textContent = `${a.prix} $`;
+    c.append(image, touche, prix);
+    c.addEventListener('click', () => equiper(a.id));
+    $('barre-armes').append(c);
+    cases.set(a.id, c);
+  }
+  canvas.addEventListener('wheel', (e) => {
+    if (fps && !boutiqueOuverte && role() !== 'protege') armeSuivante(e.deltaY > 0 ? 1 : -1);
+  }, { passive: true });
 
   function commandesLocales(dt) {
     const r = role();
+    cadence -= dt;
+    if (boutiqueOuverte) {
+      if (clavier.consommer('KeyE') || clavier.consommer('Escape')) fermerBoutique();
+      return;
+    }
     if (r !== 'protege' && clavier.consommer('KeyE')) {
       if (jePorte()) action('poser', () => sim.poser(monId));
+      else if (pretBoutique()) ouvrirBoutique();
       else if (pretAPorter()) action('porter', () => sim.demanderPorter(monId, positionsJoueurs()));
+    }
+    if (r !== 'protege') {
+      for (const [i, a] of ARMES.entries()) if (clavier.consommer(`Digit${i + 1}`)) equiper(a.id);
     }
     if (r === 'protege' && clavier.consommer('KeyF')) action('illuminer', () => sim.demanderIllumination(monId));
     if (monde.phase === 'attente' && clavier.consommer('Enter')) lancer();
-    cadence -= dt;
-    if (vue.etat.gachette && r !== 'protege' && !jePorte() && cadence <= 0) tirer();
+    if (vue.etat.gachette && r !== 'protege' && !jePorte() && cadence <= 0 && arme.prete()) tirer();
   }
 
   function pretAPorter() {
@@ -180,10 +397,11 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
       r: arrondi(angle(e.orientation)),
       v: arrondi(e.vitesse, 1),
       vp: arrondi(vue.etat.tangage),
+      ar: indiceArme(armeEquipee),
     };
     const inchange =
       dernierEtat && etat.p.every((v, i) => v === dernierEtat.p[i]) &&
-      etat.r === dernierEtat.r && etat.v === dernierEtat.v && etat.vp === dernierEtat.vp;
+      etat.r === dernierEtat.r && etat.v === dernierEtat.v && etat.vp === dernierEtat.vp && etat.ar === dernierEtat.ar;
     // Immobile : un simple rappel de temps en temps suffit.
     if (!force && inchange && horloge - dernierEnvoi < BATTEMENT_ETAT) return;
     envoyer(etat);
@@ -258,7 +476,7 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
         annoncer(`Manche ${manche}`, detail);
       } else if (phase === 'pause') {
         const suivant = protege === monId ? 'toi' : protege ? nomDe(protege) : 'le mannequin';
-        annoncer(`Manche ${manche - 1} gagnée !`, `Prochain protégé : ${suivant}`, 5);
+        annoncer(`Manche ${manche - 1} gagnée !`, `+${BONUS_MANCHE} $ pour chacun · prochain protégé : ${suivant}`, 5);
       } else if (phase === 'defaite') {
         annoncer('Le protégé est tombé…', `Défaite à la manche ${manche}. ${monde.tues} zombies éliminés.`, 7);
       } else if (phase === 'attente' && precedent.phase === 'defaite') {
@@ -276,6 +494,32 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
     }
     if (pv < precedent.pv && protege === monId) degats = 1;
     precedent = { phase, manche, protege, pv, illumination };
+
+    // Argent gagné, arme achetée : on le montre, et la nouvelle arme passe en main.
+    const { argent, armes } = monCompte();
+    if (argent > argentPrecedent) {
+      $('gain').textContent = `+${argent - argentPrecedent} $`;
+      $('gain').classList.remove('anime');
+      void $('gain').offsetWidth;
+      $('gain').classList.add('anime');
+      gainFin = horloge + 1;
+    }
+    const nouvelles = armes & ~armesPrecedentes;
+    if (nouvelles) {
+      sonCaisse();
+      const achetee = ARMES.findLast((a, i) => nouvelles & (1 << i));
+      if (achetee) {
+        equiper(achetee.id);
+        informer(`${achetee.nom} achetée !`);
+      }
+    }
+    argentPrecedent = argent;
+    armesPrecedentes = armes;
+    // Nouvelle partie : les armes achetées sont perdues, retour au pistolet.
+    if (!possede(armeEquipee)) {
+      armeEquipee = 'pistolet';
+      arme.equiper('pistolet');
+    }
   }
 
   // --- Interface -----------------------------------------------------------
@@ -318,20 +562,33 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
       illum.hidden = true;
     }
 
-    $('viseur').hidden = !fps || r === 'protege';
+    $('viseur').hidden = !fps || r === 'protege' || boutiqueOuverte;
     if (horloge > marqueurFin) delete $('viseur').dataset.touche;
-    $('reprendre').hidden = !fps || vue.etat.verrouille || vue.etat.impossible;
     $('annonce').hidden = horloge > annonceFin;
 
     const indication = $('indication');
-    const indice = r === 'protege' ? '' : jePorte() ? 'E : poser le poteau' : pretAPorter() ? 'E : porter le poteau' : '';
+    const indice = horloge < infoFin ? infoTexte
+      : r === 'protege' || boutiqueOuverte ? ''
+        : jePorte() ? 'E : poser le poteau'
+          : pretBoutique() ? 'E : ouvrir l’armurerie'
+            : pretAPorter() ? 'E : porter le poteau' : '';
     indication.textContent = indice;
     indication.hidden = !fps || !indice;
+
+    const { argent } = monCompte();
+    $('argent').textContent = `${argent} $`;
+    $('gain').hidden = horloge > gainFin;
+    $('equipement').hidden = !fps || r === 'protege';
+    for (const [id, c] of cases) {
+      c.dataset.etat = armeEquipee === id ? 'equipee' : possede(id) ? 'achetee' : 'verrouillee';
+    }
+    if (boutiqueOuverte) rafraichirBoutique();
+    $('reprendre').hidden = !fps || boutiqueOuverte || vue.etat.verrouille || vue.etat.impossible;
 
     $('aide').textContent =
       r === 'protege' ? 'Souris : diriger la lanterne · F : Illumination'
         : jePorte() ? 'Tu portes le poteau : pas de tir, tu avances moins vite'
-          : 'ZQSD : marcher · Souris : viser · Clic : tirer · E : porter le poteau · Maj : courir · Échap : libérer la souris';
+          : 'ZQSD : marcher · Clic : tirer · 1-4 ou molette : arme · E : poteau / armurerie · Maj : courir · Échap : souris';
 
     degats = Math.max(0, degats - dt * 2.5);
     $('degats').style.opacity = String(degats * 0.8);
@@ -356,6 +613,7 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
     },
 
     sortir() {
+      fermerBoutique();
       fps = false;
       vue.activer(false);
       arme.afficher(false);
@@ -369,6 +627,13 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
       precedent = { phase: 'attente', manche: 0, protege: null, pv: PV_PROTEGE, illumination: 0 };
       membres = [];
       monstres.vider();
+      projectiles.vider();
+      tirsEnAttente = [];
+      tirsDifferes = [];
+      armeEquipee = 'pistolet';
+      arme.equiper('pistolet');
+      argentPrecedent = 0;
+      armesPrecedentes = ARMES_DEPART;
       poteau.occuper('personne');
       poteau.allumer(0);
       ile.ambiance('jour');
@@ -403,21 +668,36 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
         const vivants = monstres.nombre;
         monstres.appliquer(n.monstres);
         if (monstres.nombre < vivants && n.phase === 'manche') sonMort();
-      } else if (d.type === 'tir') {
-        if (!vecteurValide(d.o) || !vecteurValide(d.f)) return;
-        const o = new THREE.Vector3(...d.o), f = new THREE.Vector3(...d.f);
-        arme.eclair(o);
-        arme.trainee(o, f);
-        sonTir(Math.max(0, 0.6 - o.distanceTo(camera.position) / 70));
-        if (Number.isInteger(d.m)) monstres.secouer(d.m);
-        if (sim && Number.isInteger(d.m) && Number.isFinite(d.dg)) {
-          if (sim.toucher(d.m, Math.min(d.dg, DEGATS_TIR * MULTIPLICATEUR_TETE))) urgent = true;
+      } else if (d.type === 'tirs') {
+        if (!Array.isArray(d.l)) return;
+        const idArme = ARMES[Number.isInteger(d.ar) ? d.ar : 0]?.id ?? 'pistolet';
+        const tirs = d.l.slice(0, TIRS_MAX).filter((t) => Array.isArray(t) && t.slice(0, 6).every(nombreValide) && t.length >= 6);
+        tirs.forEach((t, i) => {
+          tirsDifferes.push({ quand: horloge + (i * INTERVALLE_TIRS) / tirs.length, t, idArme });
+          const [, , , , , , m, dg] = t;
+          if (sim && Number.isInteger(m) && Number.isFinite(dg)) {
+            if (sim.toucher(m, Math.min(dg, DEGATS_BALLE_MAX), de)) urgent = true;
+          }
+        });
+      } else if (d.type === 'grenade') {
+        if (!vecteurValide(d.o) || !vecteurValide(d.v)) return;
+        const o = new THREE.Vector3(...d.o);
+        projectiles.lancer(o, new THREE.Vector3(...d.v), false);
+        arme.eclair(o, 1.6);
+        sonTir(Math.max(0, 0.6 - o.distanceTo(camera.position) / 70), 'lance');
+      } else if (d.type === 'explosion') {
+        if (!sim || !Array.isArray(d.c)) return;
+        for (const c of d.c.slice(0, 30)) {
+          if (Array.isArray(c) && Number.isInteger(c[0]) && Number.isFinite(c[1])) {
+            if (sim.toucher(c[0], Math.min(c[1], GRENADE.degats), de)) urgent = true;
+          }
         }
       } else if (sim) {
         const faits = {
           porter: () => sim.demanderPorter(de, positionsJoueurs()),
           poser: () => sim.poser(de),
           illuminer: () => sim.demanderIllumination(de),
+          acheter: () => typeof d.arme === 'string' && sim.acheter(de, d.arme, positionsJoueurs()),
           lancer: () => {
             sim.definirMembres(membres, { roleSolo });
             return sim.demarrer();
@@ -450,6 +730,17 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
           vue.orienter(Math.atan2(-dx, -dz), Math.atan2(dy, Math.hypot(dx, dz)));
         },
         teleporter: (x, z) => joueur.teleporter(x, z),
+        // Hôte seulement : de l'argent pour tester la boutique.
+        crediter(n, id = monId) {
+          if (!sim) return false;
+          sim.etat.comptes[id] ??= { argent: 0, armes: ARMES_DEPART };
+          sim.etat.comptes[id].argent += n;
+          urgent = true;
+          return true;
+        },
+        equiper,
+        boutique: () => ({ ouverte: boutiqueOuverte, arme: armeEquipee, compte: monCompte() }),
+        acheter: acheterOuEquiper,
       };
     },
 
@@ -482,8 +773,10 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
       else clavier.oublier();
 
       const r = role();
+      if (fps && r === 'protege') fermerBoutique();
       if (fps && r !== 'protege') {
-        joueur.mettreAJour(dt, clavier.commandes(), vue.etat.lacet, {
+        const commandes = boutiqueOuverte ? { avant: 0, lateral: 0, course: false, saut: false } : clavier.commandes();
+        joueur.mettreAJour(dt, commandes, vue.etat.lacet, {
           orientation: vue.etat.lacet + Math.PI,
           facteur: jePorte() ? FACTEUR_PORTEUR : 1,
         });
@@ -507,10 +800,36 @@ export function creerJeu({ scene, camera, canvas, ile, clavier, joueur, avatars,
       if (fps) {
         const e = joueur.etat;
         vue.appliquer(camera, e.x, e.y + HAUTEUR_YEUX, e.z);
+        // Une explosion proche secoue la vue.
+        if (secousse > 0) {
+          camera.position.x += (Math.random() - 0.5) * 0.12 * secousse;
+          camera.position.y += (Math.random() - 0.5) * 0.12 * secousse;
+        }
       }
+      secousse = Math.max(0, secousse - dt * 2.5);
       arme.afficher(fps && r !== 'protege' && !jePorte());
       arme.mettreAJour(dt, joueur.etat.vitesse);
       monstres.mettreAJour(dt, !!sim);
+
+      // Tirs des autres, rejoués au fil de l'eau.
+      if (tirsDifferes.length) {
+        const restants = [];
+        for (const tir of tirsDifferes) {
+          if (tir.quand > horloge) {
+            restants.push(tir);
+            continue;
+          }
+          const [ox, oy, oz, fx, fy, fz, m] = tir.t;
+          const o = new THREE.Vector3(ox, oy, oz);
+          arme.eclair(o);
+          arme.trainee(o, new THREE.Vector3(fx, fy, fz));
+          sonTir(Math.max(0, 0.6 - o.distanceTo(camera.position) / 70), tir.idArme);
+          if (Number.isInteger(m)) monstres.secouer(m);
+        }
+        tirsDifferes = restants;
+      }
+      for (const { position, locale } of projectiles.mettreAJour(dt, [...monstres.vivants()])) exploser(position, locale);
+      envoyerTirs();
 
       ile.ambiance(monde.phase === 'attente' ? 'jour' : monde.illumination > 0 ? 'illumination' : 'nuit');
       if (fps || r === 'protege') envoyerEtat(false);

@@ -60,12 +60,14 @@ export function creerMonstresVue(scene) {
     const racine = new THREE.Group();
     const corps = new THREE.Group();
     racine.add(corps);
-    const maille = (geo, mat = matiere) => {
+    // Seul le tronc projette une ombre : six fois moins de travail pour les
+    // ombres quand la horde est là.
+    const maille = (geo, mat = matiere, ombre = false) => {
       const m = new THREE.Mesh(geo, mat);
-      m.castShadow = true;
+      m.castShadow = ombre;
       return m;
     };
-    corps.add(maille(g.tronc), maille(g.yeux, matiereYeux));
+    corps.add(maille(g.tronc, matiere, true), maille(g.yeux, matiereYeux));
     const membre = (geo, x, y) => {
       const pivot = new THREE.Group();
       pivot.position.set(x, y, 0);
@@ -171,9 +173,23 @@ export function creerMonstresVue(scene) {
       return premierTouche(origine, direction, cibles, portee);
     },
 
-    // Zombies vivants, pour la lanterne du mannequin.
+    // Zombies vivants (positions des pieds), pour la lanterne du mannequin.
     *vivants() {
       for (const v of vues.values()) if (v.mort < 0) yield v.racine.position;
+    },
+
+    // Zombies à portée d'une explosion : [{ id, distance }].
+    autourDe(point, rayon) {
+      const touches = [];
+      for (const [id, v] of vues) {
+        if (v.mort >= 0) continue;
+        const p = v.racine.position;
+        // Distance au corps (entre les pieds et la tête), pas aux pieds.
+        const y = Math.min(Math.max(point.y, p.y), p.y + 1.9);
+        const d = Math.hypot(p.x - point.x, y - point.y, p.z - point.z);
+        if (d <= rayon) touches.push({ id, distance: d });
+      }
+      return touches;
     },
 
     vider() {

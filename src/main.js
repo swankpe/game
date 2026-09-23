@@ -71,7 +71,7 @@ const joueur = creerJoueur();
 const avatars = creerAvatars(scene);
 // partie n'est lue qu'au moment d'envoyer, bien après son initialisation.
 const jeu = creerJeu({
-  scene, camera, canvas, ile, clavier, joueur, avatars,
+  scene, camera, canvas, rendu, ile, clavier, joueur, avatars,
   envoyer: (donnees) => partie?.envoyer(donnees),
 });
 

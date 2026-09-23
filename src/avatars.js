@@ -4,7 +4,8 @@
 
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { APPARITION } from './monde.js';
-import { animerPersonnage, creerPersonnage, libererPersonnage } from './personnage.js';
+import { animerPersonnage, creerPersonnage, equiperPersonnage, libererPersonnage } from './personnage.js';
+import { ARMES } from './regles.js';
 
 const LIMITE = 500;
 
@@ -15,7 +16,8 @@ function etatValide(e) {
   if ([x, y, z].some((v) => Math.abs(v) > LIMITE)) return null;
   const v = Number.isFinite(e.v) ? Math.min(Math.max(e.v, 0), 20) : 0;
   const vp = Number.isFinite(e.vp) ? Math.min(Math.max(e.vp, -1.6), 1.6) : 0;
-  return { x, y, z, r: e.r, v, vp };
+  const ar = Number.isInteger(e.ar) && e.ar >= 0 && e.ar < ARMES.length ? e.ar : 0;
+  return { x, y, z, r: e.r, v, vp, ar };
 }
 
 export function creerAvatars(scene) {
@@ -95,6 +97,7 @@ export function creerAvatars(scene) {
           const d = Math.atan2(Math.sin(cible.r - modele.rotation.y), Math.cos(cible.r - modele.rotation.y));
           modele.rotation.y += d * t;
           avatar.vitesse += (cible.v - avatar.vitesse) * t;
+          equiperPersonnage(modele, ARMES[cible.ar].id);
         }
         animerPersonnage(modele, dt, { vitesse: avatar.vitesse, pose: poseDe(avatar.id) });
       }

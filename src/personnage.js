@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { normaliserApparence } from './apparence.js';
+import { creerModeleArme, libererModele } from './armes.js';
 
 // Profils de révolution (rayon, hauteur) : LatheGeometry à 8 faces donne
 // l'aspect facetté.
@@ -166,25 +167,6 @@ function creerBras(cote, mats) {
   return pivot;
 }
 
-// Pistolet low-poly, canon vers +z, crosse vers le bas. La bouche du canon
-// est en BOUCHE_PISTOLET, pour placer l'éclair du tir.
-export const BOUCHE_PISTOLET = new THREE.Vector3(0, 0.035, 0.21);
-
-export function creerPistolet() {
-  const metal = new THREE.MeshStandardMaterial({ color: '#2b2e35', flatShading: true, roughness: 0.45, metalness: 0.4 });
-  const crosse = new THREE.MeshStandardMaterial({ color: '#1c1d21', flatShading: true, roughness: 0.8 });
-  const pistolet = new THREE.Group();
-  pistolet.add(maillage(new THREE.BoxGeometry(0.05, 0.06, 0.24), metal, 0, 0.03, 0.07));
-  const poignee = maillage(new THREE.BoxGeometry(0.045, 0.13, 0.07), crosse, 0, -0.05, -0.02);
-  poignee.rotation.x = 0.25;
-  pistolet.add(poignee);
-  const canon = maillage(new THREE.CylinderGeometry(0.014, 0.014, 0.03, 6), crosse, 0, 0.035, 0.195);
-  canon.rotation.x = Math.PI / 2;
-  pistolet.add(canon);
-  pistolet.add(maillage(new THREE.BoxGeometry(0.012, 0.04, 0.05), crosse, 0, -0.015, 0.04));
-  return pistolet;
-}
-
 export function creerPersonnage(apparenceBrute) {
   const a = normaliserApparence(apparenceBrute);
   const mats = {
@@ -210,11 +192,11 @@ export function creerPersonnage(apparenceBrute) {
   corps.add(jambeG, jambeD, brasG, brasD);
 
   // Dans la main droite, canon dans le prolongement du bras.
-  const pistolet = creerPistolet();
-  pistolet.position.set(0, -0.6, 0.02);
-  pistolet.rotation.x = Math.PI / 2;
-  pistolet.visible = false;
-  brasD.add(pistolet);
+  const main = new THREE.Group();
+  main.position.set(0, -0.6, 0.02);
+  main.rotation.x = Math.PI / 2;
+  main.visible = false;
+  brasD.add(main);
 
   corps.add(maillage(new THREE.CylinderGeometry(0.24, 0.235, 0.32, 7), mats.salopette, 0, 0.99, 0));
   corps.add(maillage(new THREE.CylinderGeometry(0.2, 0.235, 0.52, 7), mats.haut, 0, 1.29, 0));
@@ -235,11 +217,23 @@ export function creerPersonnage(apparenceBrute) {
     if (o.isMesh) o.castShadow = true;
   });
   racine.userData = {
-    parties: { corps, tete, jambeG, jambeD, brasG, brasD, yeux, pistolet },
+    parties: { corps, tete, jambeG, jambeD, brasG, brasD, yeux, main },
     sommet,
     anim: { phase: 0, intensite: 0, regard: [0, 0], cible: [0, 0], prochainRegard: 0, clignement: 0, prochainClignement: 2, temps: 0 },
   };
+  equiperPersonnage(racine, 'pistolet');
   return racine;
+}
+
+// Met l'arme idArme dans la main droite (la poignée dans la paume).
+export function equiperPersonnage(racine, idArme) {
+  const { parties } = racine.userData;
+  if (racine.userData.arme === idArme) return;
+  for (const ancien of [...parties.main.children]) libererModele(ancien);
+  const modele = creerModeleArme(idArme);
+  modele.position.copy(modele.userData.poignee).multiplyScalar(-1);
+  parties.main.add(modele);
+  racine.userData.arme = idArme;
 }
 
 export function libererPersonnage(racine) {
@@ -280,7 +274,7 @@ export function animerPersonnage(racine, dt, { vitesse = 0, regardFixe = false, 
     bras.rotation.x += (cibleX - bras.rotation.x) * souple;
     bras.rotation.z += (bras.userData.cote * rz - bras.rotation.z) * souple;
   }
-  p.pistolet.visible = pose === 'arme';
+  p.main.visible = pose === 'arme';
   const respiration = Math.sin(e.temps * 2.2) * 0.008;
   p.corps.position.y = Math.abs(Math.cos(e.phase)) * 0.05 * e.intensite + respiration;
   p.tete.rotation.z = Math.sin(e.phase) * 0.04 * e.intensite;

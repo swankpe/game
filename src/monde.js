@@ -69,6 +69,9 @@ export function estPraticable(x, z) {
 
 export const CABANE = { x: -15, z: -5, largeur: 5, profondeur: 4 };
 
+// Devant le comptoir de la cabane, qui sert d'armurerie.
+export const BOUTIQUE = { x: CABANE.x + CABANE.profondeur / 2 + 1.3, z: CABANE.z };
+
 // Sur le sable, face au ponton et à la mer.
 export const APPARITION = { x: 16.5, z: 0, orientation: Math.PI / 2 };
 

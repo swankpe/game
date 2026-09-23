@@ -75,6 +75,14 @@
       </div>
       <p id="illumination" class="illumination" hidden></p>
 
+      <div id="equipement" class="equipement" hidden>
+        <div class="bourse">
+          <span id="gain" class="gain" hidden></span>
+          <strong id="argent">0 $</strong>
+        </div>
+        <div id="barre-armes" class="barre-armes"></div>
+      </div>
+
       <div id="lancement" class="carte lancement">
         <p id="texte-lancement"></p>
         <div id="role-solo" class="choix-role" hidden>
@@ -96,6 +104,19 @@
       <p id="reseau" class="alerte-reseau" hidden>Connexion perdue, reconnexion…</p>
     </section>
     <div id="degats" class="degats" aria-hidden="true"></div>
+
+    <section id="boutique" class="boutique" hidden aria-label="Armurerie">
+      <div class="boutique-cadre">
+        <header>
+          <div>
+            <h2>Armurerie</h2>
+            <p>Dans ta poche : <strong id="boutique-argent">0 $</strong> · <span id="boutique-regle"></span></p>
+          </div>
+          <button id="boutique-fermer" type="button">Fermer (E)</button>
+        </header>
+        <div id="boutique-armes" class="boutique-armes"></div>
+      </div>
+    </section>
 
     <div id="notifications" aria-live="polite"></div>
     <p id="sans-webgl" class="sans-webgl" hidden>Ton navigateur ne peut pas afficher la 3D (WebGL indisponible).</p>

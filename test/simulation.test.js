@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { creerSimulation, normaliserMonde } from '../src/simulation.js';
 import {
-  DISTANCE_PORTER, DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE, PV_MONSTRE, PV_PROTEGE,
-  POTEAU_DEPART, RECHARGE_ILLUMINATION, positionPortee, premierTouche, tirerProtege,
+  ARMES, ARMES_DEPART, BONUS_MANCHE, DISTANCE_PORTER, DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE,
+  PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART, RECHARGE_ILLUMINATION, RECOMPENSE_ZOMBIE, degatsExplosion, indiceArme,
+  monstresParMinute, positionPortee, premierTouche, pvMonstre, tirerProtege, vitesseMonstre,
 } from '../src/regles.js';
-import { estPraticable, resoudreCollisions } from '../src/monde.js';
+import { BOUTIQUE, CABANE, estPraticable, resoudreCollisions } from '../src/monde.js';
 
 const graine = (n) => () => {
   n = (n * 16807) % 2147483647;
@@ -229,4 +230,86 @@ test('un tir touche le premier zombie sur sa trajectoire, et reconnaît la tête
   assert.equal(premierTouche([0, 1.2, 0], [0, 0, 1], cibles), null, 'derrière soi');
   assert.equal(premierTouche([0, 3, 0], [0, 0, -1], cibles), null, 'au-dessus des têtes');
   assert.equal(premierTouche([0, 1.2, 0], [0, 0, -1], cibles, 3), null, 'hors de portée');
+});
+
+test('un zombie coincé derrière la cabane la contourne et atteint le poteau', () => {
+  const sim = lancer();
+  const s = sim.etat;
+  s.cumul = -1e9; // pas d'autres apparitions
+  s.monstres = [{ id: 999, x: CABANE.x - CABANE.profondeur / 2 - 1.5, z: CABANE.z, r: 0, pv: 30, v: 1, a: false, c: 1 }];
+  avancer(sim, 40);
+  const m = s.monstres[0];
+  assert.ok(Math.hypot(m.x - s.poteau.x, m.z - s.poteau.z) < 2, `arrivé au poteau (${m.x.toFixed(1)}, ${m.z.toFixed(1)})`);
+});
+
+test('chaque zombie tué rapporte au tireur, pas aux autres', () => {
+  const sim = lancer(['a', 'b']);
+  avancer(sim, 3);
+  const [m] = sim.etat.monstres;
+  assert.ok(sim.toucher(m.id, 100, 'a'));
+  assert.equal(sim.etat.comptes.a.argent, RECOMPENSE_ZOMBIE);
+  assert.equal(sim.etat.comptes.b?.argent ?? 0, 0);
+  avancer(sim, 3);
+  const [m2] = sim.etat.monstres;
+  assert.ok(sim.toucher(m2.id, 100, 'intrus'), 'un inconnu tue, mais ne gagne rien');
+  assert.equal(sim.etat.comptes.intrus, undefined);
+});
+
+test("on n'achète qu'au comptoir de l'armurerie, avec assez d'argent, et une seule fois", () => {
+  const sim = lancer(['a', 'b']);
+  const acheteur = sim.etat.protege === 'a' ? 'b' : 'a';
+  const auComptoir = joueurs({ [acheteur]: { x: BOUTIQUE.x, z: BOUTIQUE.z, r: 0 } });
+  const loin = joueurs({ [acheteur]: { x: 0, z: 0, r: 0 } });
+  assert.ok(!sim.acheter(acheteur, 'uzi', auComptoir), 'pas assez d’argent');
+  sim.etat.comptes[acheteur].argent = 1000;
+  assert.ok(!sim.acheter(acheteur, 'uzi', loin), 'trop loin du comptoir');
+  assert.ok(!sim.acheter(acheteur, 'pistolet', auComptoir), 'le pistolet ne s’achète pas');
+  assert.ok(!sim.acheter(acheteur, 'bazooka', auComptoir), 'arme inconnue');
+  assert.ok(sim.acheter(acheteur, 'uzi', auComptoir));
+  const uzi = ARMES[indiceArme('uzi')];
+  assert.equal(sim.etat.comptes[acheteur].argent, 1000 - uzi.prix);
+  assert.equal(sim.etat.comptes[acheteur].armes, ARMES_DEPART | (1 << indiceArme('uzi')));
+  assert.ok(!sim.acheter(acheteur, 'uzi', auComptoir), 'déjà achetée');
+  assert.ok(!sim.acheter(sim.etat.protege, 'fusil', joueurs({ [sim.etat.protege]: { x: BOUTIQUE.x, z: BOUTIQUE.z, r: 0 } })), 'le protégé est ligoté');
+});
+
+test('une manche gagnée rapporte un bonus à tous ; une nouvelle partie remet les comptes à zéro', () => {
+  const sim = lancer(['a', 'b']);
+  sim.etat.comptes.a = { argent: 40, armes: 3 };
+  avancerDefendu(sim, DUREE_MANCHE + 0.5);
+  assert.equal(sim.etat.phase, 'pause');
+  assert.equal(sim.etat.comptes.a.argent, 40 + BONUS_MANCHE);
+  assert.equal(sim.etat.comptes.b.argent, BONUS_MANCHE);
+  // Défaite, retour au camp : les économies restent jusqu'au prochain lancement.
+  avancer(sim, DUREE_PAUSE + 0.5);
+  while (sim.etat.phase === 'manche') sim.pas(0.2, joueurs());
+  avancer(sim, DUREE_DEFAITE + 0.5);
+  assert.equal(sim.etat.phase, 'attente');
+  assert.equal(sim.etat.comptes.a.armes, 3);
+  assert.ok(sim.demarrer());
+  assert.deepEqual(sim.etat.comptes, {});
+});
+
+test("argent et armes survivent au départ de l'hôte", () => {
+  const ancien = lancer(['a', 'b']);
+  ancien.etat.comptes.a = { argent: 320, armes: 5 };
+  const nouveau = creerSimulation();
+  assert.ok(nouveau.charger(JSON.parse(JSON.stringify(ancien.instantane()))));
+  assert.deepEqual(nouveau.etat.comptes.a, { argent: 320, armes: 5 });
+  const tordu = normaliserMonde({ ph: 'manche', jo: { x: [-5, 1], y: [10, 999], z: 'rien' } });
+  assert.deepEqual(tordu.comptes, { y: { argent: 10, armes: 999 & 15 } });
+});
+
+test('les zombies résistent mieux et courent plus vite de manche en manche', () => {
+  assert.equal(pvMonstre(1), 30);
+  assert.ok(pvMonstre(4) > pvMonstre(2));
+  assert.ok(vitesseMonstre(1) >= 2.3 && vitesseMonstre(10) <= 4);
+  assert.ok(monstresParMinute(1, DUREE_MANCHE) > monstresParMinute(1, 0) * 2);
+});
+
+test("la grenade blesse moins au bord de l'explosion, pas du tout au-delà", () => {
+  const lance = ARMES[indiceArme('lance')];
+  assert.equal(degatsExplosion(lance, 0), lance.degats);
+  assert.ok(degatsExplosion(lance, lance.rayon) < lance.degats * 0.5);
+  assert.equal(degatsExplosion(lance, lance.rayon + 0.1), 0);
 });

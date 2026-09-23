@@ -32,14 +32,22 @@ valide.
 
 | Message (broadcast `jeu`) | Émetteur | Contenu |
 | --- | --- | --- |
-| `etat` | chaque joueur | position, orientation du corps `r`, inclinaison du regard `vp` |
-| `monde` | l'hôte | l'instantané complet (voir `normaliserMonde`) |
-| `tir` | le tireur | trajectoire pour l'effet ; `m` et `dg` si un zombie est touché |
-| `porter`, `poser`, `illuminer`, `lancer` | un joueur | demande que seul l'hôte applique |
+| `etat` | chaque joueur | position, orientation du corps `r`, regard `vp`, arme en main `ar` |
+| `monde` | l'hôte | l'instantané complet, argent et armes compris (voir `normaliserMonde`) |
+| `tirs` | le tireur | paquet de balles (100 ms) : trajectoires, et `m`, `dg` si un zombie est touché |
+| `grenade` | le tireur | départ et vitesse : chaque navigateur simule la même trajectoire |
+| `explosion` | le tireur | zombies touchés par sa grenade et dégâts |
+| `porter`, `poser`, `illuminer`, `lancer`, `acheter` | un joueur | demande que seul l'hôte applique |
 
 Le tireur détecte lui-même l'impact (sur les zombies tels qu'il les voit) : entre
-amis, on fait confiance, l'hôte ne fait que borner les dégâts. Si l'hôte part,
-le suivant appelle `sim.charger(dernier instantané)` et continue.
+amis, on fait confiance, l'hôte ne fait que borner les dégâts et crédite
+l'argent au tireur. Les achats sont validés par l'hôte (argent suffisant, joueur
+devant le comptoir `BOUTIQUE`). Si l'hôte part, le suivant appelle
+`sim.charger(dernier instantané)` et continue.
+
+Les tirs partent **par paquets** : un Uzi tire 14 balles par seconde, un
+message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
+étalé sur 100 ms.
 
 ## Architecture
 
@@ -55,10 +63,13 @@ le suivant appelle `sim.charger(dernier instantané)` et continue.
 | `src/monde.js` | relief, décor, collisions : partagés par rendu, physique et simulation |
 | `src/ile.js` | rendu de l'île et des trois ambiances (jour, nuit, Illumination) |
 | `src/geometrie.js` | pièces low-poly colorées par sommet puis fusionnées |
-| `src/personnage.js` | perso des joueurs, poses (libre, arme, porte, attache), pistolet |
+| `src/personnage.js` | perso des joueurs, poses (libre, arme, porte, attache), arme en main |
+| `src/armes.js` | modèles des 4 armes et de la grenade (profils extrudés, biseautés) |
+| `src/apercus.js` | vignettes des armes photographiées au démarrage, pour la boutique et la barre d'armes |
+| `src/projectiles.js` | grenades en vol, découpées en pas de 20 ms |
 | `src/monstres.js` | zombies à l'écran : 6 maillages chacun, géométries partagées |
 | `src/poteau.js` | mât, cordes, lanterne orientable, mannequin de paille |
-| `src/arme.js` | pistolet à la première personne, éclairs et traînées de tir |
+| `src/arme.js` | arme à la première personne (mains, changement d'arme), éclairs, traînées, explosions |
 | `src/vue.js` | souris verrouillée, regard à la première personne |
 | `src/joueur.js` | clavier et déplacements |
 | `src/avatars.js` | les autres joueurs : modèles, étiquettes, lissage |
@@ -72,14 +83,16 @@ npm test
 ```
 
 `node:test` couvre la simulation (manches, défaite, tirage, poteau,
-Illumination, reprise par un nouvel hôte), les règles, le salon et un salon
+Illumination, argent, achats, contournement des obstacles, reprise par un
+nouvel hôte), les règles, le salon et un salon
 complet sur `BroadcastChannel` (qui existe dans Node). Aucun test n'appelle
 Supabase.
 
 Le jeu lui-même ne se vérifie qu'avec Playwright, dans Chromium lancé avec
 `--use-angle=swiftshader --enable-unsafe-swiftshader`. Ouvrir l'adresse avec
 `?debug` expose `window.leProtege` : `etat()`, `viser(x, y, z)`,
-`teleporter(x, z)`. Pièges :
+`teleporter(x, z)`, `crediter(n, id)` (hôte), `acheter(id)`, `equiper(id)`,
+`boutique()`. Pièges :
 - `#hud` mesure 0×0 (enfants en `position: fixed`) : attendre `#hud .salon`.
 - Cliquer sur une zone libre de la scène : dans une petite fenêtre, le centre
   tombe sur la carte du salon et la souris n'est jamais verrouillée.
@@ -106,6 +119,13 @@ Le jeu lui-même ne se vérifie qu'avec Playwright, dans Chromium lancé avec
   `l`, vers `(-sin l, -cos l)`. D'où `r = l + π` partout.
 - Le poteau porté est devant et à droite du porteur (`positionPortee`) : droit
   devant, il bouchait toute la vue.
+- Zombies : seul le tronc projette une ombre (60 zombies × 6 maillages ×
+  2 sources d'ombre, sinon). Bloqués par un obstacle, ils glissent sur le côté
+  (`c` : côté de contournement).
+- Métal sans environnement à refléter = noir. Les vignettes ont un
+  `RoomEnvironment` ; en jeu, le métal garde une faible `metalness` et une
+  lumière d'appoint accrochée à la caméra éclaire l'arme en main la nuit.
+- La barre d'armes est à gauche : à droite, elle recouvrait l'arme en main.
 - Étiquettes CSS2D : retirer l'étiquette elle-même (`removeFromParent`) pour
   que son élément quitte le DOM.
 - Supabase : redéclarer la présence (`track`) à chaque `SUBSCRIBED`.

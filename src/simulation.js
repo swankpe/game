@@ -3,11 +3,12 @@
 // pas() à chaque image et diffuse instantane() ; si l'hôte s'en va, le
 // suivant reprend avec charger(dernier instantané reçu).
 
-import { estPraticable, rayonIle, resoudreCollisions } from './monde.js';
+import { BOUTIQUE, estPraticable, rayonIle, resoudreCollisions } from './monde.js';
 import {
-  DEGATS_MONSTRE, DISTANCE_PORTER, DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE,
-  MONSTRES_MAX, PORTEE_ATTAQUE, POTEAU_DEPART, PV_MONSTRE, PV_PROTEGE, RECHARGE_ILLUMINATION,
-  monstresParMinute, positionPortee, tirerProtege, vitesseMonstre,
+  ARMES, ARMES_DEPART, BONUS_MANCHE, DEGATS_MONSTRE, DISTANCE_BOUTIQUE, DISTANCE_PORTER, DUREE_DEFAITE,
+  DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE, MONSTRES_MAX, PART_COUREURS, PORTEE_ATTAQUE, POTEAU_DEPART,
+  PV_PROTEGE, RECHARGE_ILLUMINATION, RECOMPENSE_ZOMBIE, indiceArme, monstresParMinute, positionPortee,
+  pvMonstre, tirerProtege, vitesseMonstre,
 } from './regles.js';
 
 export const PHASES = ['attente', 'manche', 'pause', 'defaite'];
@@ -31,13 +32,20 @@ function etatInitial() {
     monstres: [],
     prochainId: 1,
     cumul: 0,
+    // Argent et armes de chaque joueur : { id: { argent, armes } }.
+    comptes: {},
   };
 }
+
+// Plafond de dégâts par coup reçu du réseau : une grenade au centre.
+const DEGATS_MAX = Math.max(...ARMES.map((a) => a.degats * 2));
 
 export function creerSimulation({ aleatoire = Math.random } = {}) {
   let s = etatInitial();
   let membres = [];
   let roleSolo = 'defenseur';
+
+  const compte = (id) => (s.comptes[id] ??= { argent: 0, armes: ARMES_DEPART });
 
   function apparaitre() {
     // Sortie de l'eau, du côté opposé au poteau de préférence.
@@ -50,14 +58,17 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
       if (!meilleur || d > meilleur.d) meilleur = { x, z, d };
       if (d > 18) break;
     }
+    const coureur = aleatoire() < PART_COUREURS;
     s.monstres.push({
       id: s.prochainId++,
       x: meilleur.x,
       z: meilleur.z,
       r: 0,
-      pv: PV_MONSTRE,
-      v: 0.85 + aleatoire() * 0.35,
+      pv: pvMonstre(s.manche),
+      v: coureur ? 1.45 + aleatoire() * 0.25 : 0.85 + aleatoire() * 0.3,
       a: false,
+      // Côté par lequel il contourne un obstacle.
+      c: aleatoire() < 0.5 ? -1 : 1,
     });
   }
 
@@ -79,8 +90,16 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
       m.r = Math.atan2(dx, dz);
       if (d > PORTEE_ATTAQUE) {
         const pas = Math.min(vitesse * m.v * dt, d - PORTEE_ATTAQUE * 0.9);
-        m.x += (dx / d) * pas;
-        m.z += (dz / d) * pas;
+        const ux = dx / d, uz = dz / d;
+        let suivant = resoudreCollisions(m.x + ux * pas, m.z + uz * pas);
+        // Bloqué contre un mur ou un tronc : il glisse sur le côté.
+        const progres = (suivant.x - m.x) * ux + (suivant.z - m.z) * uz;
+        if (progres < pas * 0.3) {
+          const cote = m.c ?? 1;
+          suivant = resoudreCollisions(m.x - uz * cote * pas + ux * pas * 0.2, m.z + ux * cote * pas + uz * pas * 0.2);
+        }
+        m.x = suivant.x;
+        m.z = suivant.z;
         m.a = false;
       } else {
         m.a = true;
@@ -173,6 +192,7 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
           s.reste = DUREE_PAUSE;
           s.monstres = [];
           s.manche += 1;
+          for (const m of membres) compte(m.id).argent += BONUS_MANCHE;
           s.protege = tirerProtege(membres, { aleatoire, roleSolo, precedent: s.precedent });
           s.precedent = s.protege;
           if (s.poteau.porteur === s.protege) s.poteau.porteur = null;
@@ -183,21 +203,39 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
       } else if (s.phase === 'defaite') {
         s.reste -= dt;
         if (s.reste <= 0) {
-          const poteau = s.poteau;
+          const { poteau, comptes } = s;
           s = etatInitial();
           s.poteau = poteau;
+          // On garde ses économies au camp ; elles repartent à zéro au lancement.
+          s.comptes = comptes;
         }
       }
     },
 
-    toucher(idMonstre, degats) {
+    // auteur : celui qui a tiré, crédité s'il est dans le salon.
+    toucher(idMonstre, degats, auteur = null) {
       const i = s.monstres.findIndex((m) => m.id === idMonstre);
       if (i < 0 || !Number.isFinite(degats)) return false;
       const m = s.monstres[i];
-      m.pv -= Math.min(Math.max(degats, 0), PV_MONSTRE * 2);
+      m.pv -= Math.min(Math.max(degats, 0), DEGATS_MAX);
       if (m.pv > 0) return false;
       s.monstres.splice(i, 1);
       s.tues += 1;
+      if (auteur && membres.some((j) => j.id === auteur)) compte(auteur).argent += RECOMPENSE_ZOMBIE;
+      return true;
+    },
+
+    // Achat à l'armurerie : il faut être devant le comptoir et avoir de quoi payer.
+    acheter(id, idArme, joueurs) {
+      const indice = indiceArme(idArme);
+      if (indice <= 0 || !membres.some((j) => j.id === id) || id === s.protege) return false;
+      const j = joueurs.get(id);
+      if (!j || Math.hypot(j.x - BOUTIQUE.x, j.z - BOUTIQUE.z) > DISTANCE_BOUTIQUE) return false;
+      const c = compte(id);
+      const bit = 1 << indice;
+      if (c.armes & bit || c.argent < ARMES[indice].prix) return false;
+      c.argent -= ARMES[indice].prix;
+      c.armes |= bit;
       return true;
     },
 
@@ -233,6 +271,7 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
         po: [arrondi(s.poteau.x), arrondi(s.poteau.z), s.poteau.porteur],
         il: [arrondi(s.illumination, 1), arrondi(s.recharge, 1)],
         tu: s.tues,
+        jo: Object.fromEntries(Object.entries(s.comptes).map(([id, c]) => [id, [c.argent, c.armes]])),
         m: s.monstres.map((m) => [m.id, arrondi(m.x), arrondi(m.z), arrondi(m.r), m.a ? 1 : 0, arrondi(m.pv, 1), arrondi(m.v)]),
       };
     },
@@ -253,6 +292,7 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
         illumination: i.illumination,
         recharge: i.recharge,
         tues: i.tues,
+        comptes: structuredClone(i.comptes),
         monstres: i.monstres.map((m) => ({ ...m })),
         prochainId: i.monstres.reduce((max, m) => Math.max(max, m.id), 0) + 1,
       };
@@ -276,7 +316,7 @@ export function normaliserMonde(inst) {
       z: m[2],
       r: fini(m[3]),
       a: m[4] === 1,
-      pv: fini(m[5], PV_MONSTRE),
+      pv: fini(m[5], 30),
       v: fini(m[6], 1),
     }));
   return {
@@ -289,6 +329,19 @@ export function normaliserMonde(inst) {
     illumination: fini(il[0]),
     recharge: fini(il[1]),
     tues: Number.isInteger(inst.tu) ? inst.tu : 0,
+    comptes: normaliserComptes(inst.jo),
     monstres,
   };
+}
+
+function normaliserComptes(jo) {
+  const comptes = {};
+  if (!jo || typeof jo !== 'object') return comptes;
+  for (const [id, v] of Object.entries(jo).slice(0, 8)) {
+    if (id.length > 64 || !Array.isArray(v)) continue;
+    const [argent, armes] = v;
+    if (!Number.isInteger(argent) || argent < 0 || !Number.isInteger(armes)) continue;
+    comptes[id] = { argent, armes: (armes & ((1 << ARMES.length) - 1)) | ARMES_DEPART };
+  }
+  return comptes;
 }

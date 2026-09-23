@@ -73,3 +73,25 @@ test('les zombies sortent du champ, hors des murailles ; boutique, arrivée et p
     assert.deepEqual(C.resoudreCollisions(p.x, p.z), { x: p.x, z: p.z });
   }
 });
+
+test('le cimetière et les arbres morts bloquent, sans couper le chemin des zombies', () => {
+  const nav = C.navigation();
+  const tombes = chateau.OBSTACLES.filter((o) => o.genre === 'tombe' || o.genre === 'croix');
+  assert.ok(tombes.length >= 10);
+  for (const o of chateau.OBSTACLES) {
+    const p = C.resoudreCollisions(o.x + 0.05, o.z);
+    assert.ok(Math.hypot(p.x - o.x, p.z - o.z) >= o.rayon, `${o.genre} en (${o.x}, ${o.z}) bloque`);
+  }
+  // Depuis les sorties longeant le cimetière, la terrasse reste joignable.
+  for (const z of [-30, -12, -5, 0, 5, 12, 30]) {
+    const d = nav.distance(30, z, 0, 0);
+    assert.ok(Number.isFinite(d) && d < 110, `terrasse depuis (30, ${z}) : ${d}`);
+  }
+  // Aucun point de sortie ne tombe dans un obstacle.
+  let n = 7;
+  const alea = () => ((n = (n * 16807 + 11) % 2147483647) / 2147483647);
+  for (let i = 0; i < 300; i++) {
+    const p = C.pointDeSortie(alea);
+    assert.ok(chateau.OBSTACLES.every((o) => Math.hypot(p.x - o.x, p.z - o.z) > o.rayon), `sortie (${p.x.toFixed(1)}, ${p.z.toFixed(1)})`);
+  }
+});

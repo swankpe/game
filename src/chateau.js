@@ -119,13 +119,27 @@ export function hauteurSol(x, z) {
   return h;
 }
 
-// Obstacles ronds de la cour : puits, charrette, tonneaux.
+// Obstacles ronds : dans la cour, puits, charrette, tonneaux, foin, caisses ;
+// dans le champ, le cimetière devant la muraille est (celle sans porte) et
+// des arbres morts, en deçà des points de sortie des zombies.
 export const OBSTACLES = [
   { x: -8, z: -9, rayon: 1.3, genre: 'puits' },
   { x: -9, z: 7, rayon: 1.4, genre: 'charrette' },
   { x: 10, z: -8, rayon: 0.9, genre: 'tonneaux' },
   { x: 11, z: 9, rayon: 0.9, genre: 'foin' },
+  { x: 13, z: 4, rayon: 0.8, genre: 'caisses' },
+  { x: -12, z: -2, rayon: 0.7, genre: 'caisses' },
 ];
+for (const [i, x] of [24.4, 26.3].entries()) {
+  for (let j = 0; j < 11; j++) {
+    if ((i * 7 + j * 3) % 5 === 0) continue;
+    const z = -11 + j * 2.2 + (i ? 0.9 : 0);
+    OBSTACLES.push({ x: x + ((j * 37) % 7) * 0.05, z, rayon: 0.4, genre: (i + j) % 3 ? 'tombe' : 'croix', penche: (((j * 13 + i * 5) % 9) - 4) * 0.03 });
+  }
+}
+for (const [x, z] of [[-25.5, -12], [-26, 13], [12, 26], [-13, -25.5], [8, -26], [26, 19], [-24.5, 25], [25, -20]]) {
+  OBSTACLES.push({ x, z, rayon: 0.35, genre: 'arbre' });
+}
 
 const RAYON_JOUEUR = 0.35;
 

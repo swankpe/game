@@ -24,6 +24,10 @@ export function colorer(geometrie, couleur, variation = 0) {
   return g;
 }
 
+// Couleur « lumineuse » : au-delà de 1, elle dépasse le seuil du halo
+// (post.js) et rayonne dans la nuit.
+export const lumineux = (couleur, force) => new THREE.Color(couleur).multiplyScalar(force);
+
 export function place(geometrie, { x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1 } = {}) {
   const m = new THREE.Matrix4().compose(
     new THREE.Vector3(x, y, z),

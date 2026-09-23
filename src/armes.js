@@ -31,8 +31,8 @@ function matieres() {
     oliveFonce: std('#3e4828', 0.75, 0.05),
     trou: new THREE.MeshBasicMaterial({ color: '#060607' }),
     // Visée phosphorescente : elle se voit dans la nuit.
-    lueur: new THREE.MeshBasicMaterial({ color: '#8dffa6' }),
-    point: new THREE.MeshBasicMaterial({ color: '#ff3b3b' }),
+    lueur: new THREE.MeshBasicMaterial({ color: new THREE.Color('#8dffa6').multiplyScalar(3) }),
+    point: new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff3b3b').multiplyScalar(5) }),
     verre: new THREE.MeshStandardMaterial({ color: '#7fb6d6', transparent: true, opacity: 0.3, roughness: 0.1, metalness: 0.2 }),
   };
 }
@@ -96,9 +96,11 @@ function chargeurDe(groupe) {
   return c;
 }
 
-function finaliser(groupe, { bouche, poignee, garde, chargeur, barillet = false }) {
+// ejection : fenêtre d'où sortent les douilles (aucune pour le lance-grenades).
+function finaliser(groupe, { bouche, poignee, garde, chargeur, barillet = false, ejection = null }) {
   groupe.userData = {
     bouche: new THREE.Vector3(...bouche),
+    ejection: ejection ? new THREE.Vector3(...ejection) : null,
     poignee: new THREE.Vector3(...poignee),
     garde: garde ? new THREE.Vector3(...garde) : null,
     chargeur,
@@ -136,7 +138,7 @@ function creerPistolet() {
   }
   g.add(boite(0.006, 0.011, 0.008, m.noir, [0, 0.051, 0.098]));
   g.add(bille(0.0022, m.lueur, [0, 0.054, 0.1025]));
-  return finaliser(g, { bouche: [0, 0.024, 0.122], poignee: [0, -0.07, -0.072], garde: [0.022, -0.088, -0.058], chargeur });
+  return finaliser(g, { bouche: [0, 0.024, 0.122], poignee: [0, -0.07, -0.072], garde: [0.022, -0.088, -0.058], chargeur, ejection: [-0.018, 0.032, 0.03] });
 }
 
 function creerUzi() {
@@ -174,7 +176,7 @@ function creerUzi() {
   g.add(boite(0.05, 0.034, 0.02, m.acier, [0, 0.026, -0.13]));
   for (const y of [0.012, 0.048]) g.add(tube(0.0038, 0.225, m.acierClair, [0.028, y, -0.02]));
   g.add(boite(0.012, 0.052, 0.012, m.caoutchouc, [0.028, 0.03, 0.094]));
-  return finaliser(g, { bouche: [0, 0.03, 0.205], poignee: [0, -0.062, -0.01], garde: [0.012, -0.014, 0.088], chargeur });
+  return finaliser(g, { bouche: [0, 0.03, 0.205], poignee: [0, -0.062, -0.01], garde: [0.012, -0.014, 0.088], chargeur, ejection: [-0.027, 0.038, 0.04] });
 }
 
 function creerFusil() {
@@ -221,7 +223,7 @@ function creerFusil() {
   for (const z of [0.617, 0.632]) g.add(boite(0.034, 0.005, 0.009, m.trou, [0, 0.04, z]));
   g.add(tube(0.006, 0.01, m.trou, [0, 0.03, 0.648]));
   g.add(tube(0.004, 0.24, m.acierClair, [0, 0.008, 0.49]));
-  return finaliser(g, { bouche: [0, 0.03, 0.652], poignee: [0, -0.058, -0.055], garde: [0, -0.008, 0.27], chargeur });
+  return finaliser(g, { bouche: [0, 0.03, 0.652], poignee: [0, -0.058, -0.055], garde: [0, -0.008, 0.27], chargeur, ejection: [-0.025, 0.042, 0.06] });
 }
 
 function creerLanceGrenades() {

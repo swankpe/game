@@ -5,16 +5,20 @@
 // lampe de l'armurier en est une, créée avec les autres (voir ile.js).
 
 import * as THREE from 'three';
+import { creerBraises, creerBrume } from './ambiance.js';
 import { creerModeleArme } from './armes.js';
 import {
-  BLOCS, BOUTIQUE, COUR, DEMI_PORTE, ETAL, H_PARAPET, H_RONDE, H_TERRASSE, H_TOUR, OBSTACLES, RAMPES, TERRASSE, TOURS,
+  BLOCS, BOUTIQUE, COUR, DEMI_PORTE, EPAISSEUR_MUR, ETAL, H_PARAPET, H_RONDE, H_TERRASSE, H_TOUR, OBSTACLES, RAMPES, TERRASSE, TOURS,
 } from './chateau.js';
-import { colorer, fusionner, hachage, place } from './geometrie.js';
+import { colorer, fusionner, hachage, lumineux, place } from './geometrie.js';
 
 const PIERRES = ['#8b857a', '#7f796f', '#958f84', '#77726a', '#8f887c'];
 const PAVES = ['#6e6a63', '#78736b', '#65615b', '#827c73'];
 const BOIS = ['#6b4a33', '#7a5638', '#5e412c'];
 const HERBE = ['#35412c', '#3c4a30', '#2f3a27', '#46512f'];
+const FEUILLES = ['#3f5a2a', '#4a6b30', '#35502a', '#56733a'];
+const ECORCE = '#3a332c';
+const EXT = COUR + EPAISSEUR_MUR;
 const ASSISE = 0.9;
 const LONGUEUR_PIERRE = 1.6;
 
@@ -162,12 +166,162 @@ function textureHalo() {
   return t;
 }
 
+// Un rameau (tronc, branche, os) de a à b, plus fin au bout.
+function rameau(parties, a, b, r0, r1, couleur) {
+  const va = new THREE.Vector3(...a), vb = new THREE.Vector3(...b);
+  const d = vb.clone().sub(va);
+  const geo = new THREE.CylinderGeometry(r1, r0, d.length(), 5);
+  geo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
+  geo.translate((va.x + vb.x) / 2, (va.y + vb.y) / 2, (va.z + vb.z) / 2);
+  parties.push(colorer(geo, couleur, 0.1));
+}
+
+// Arbre mort : un tronc tordu, des branches nues qui griffent le ciel.
+function arbreMort(parties, x, z, graine) {
+  const h = 4 + hachage(graine, 1) * 2.5;
+  const cime = [x + (hachage(graine, 2) - 0.5) * 1.2, h, z + (hachage(graine, 3) - 0.5) * 1.2];
+  rameau(parties, [x, -0.2, z], cime, 0.32, 0.1, ECORCE);
+  for (let k = 0; k < 6; k++) {
+    const t = 0.35 + k * 0.11;
+    const p = [x + (cime[0] - x) * t, -0.2 + (h + 0.2) * t, z + (cime[2] - z) * t];
+    const a = graine * 1.7 + k * 2.4;
+    const l = (1.8 - k * 0.2) * (0.8 + hachage(k, graine) * 0.4);
+    const q = [p[0] + Math.cos(a) * l, p[1] + l * 0.55, p[2] + Math.sin(a) * l];
+    rameau(parties, p, q, 0.1 - k * 0.012, 0.03, ECORCE);
+    for (const d of [-0.9, 0.7]) {
+      const b = a + d;
+      rameau(parties, q, [q[0] + Math.cos(b) * l * 0.45, q[1] + l * (0.3 + hachage(d, k) * 0.3), q[2] + Math.sin(b) * l * 0.45], 0.03, 0.01, ECORCE);
+    }
+  }
+  // Racines qui sortent de terre.
+  for (let k = 0; k < 4; k++) {
+    const a = graine + k * 1.6;
+    rameau(parties, [x, 0.3, z], [x + Math.cos(a) * 0.9, -0.1, z + Math.sin(a) * 0.9], 0.12, 0.04, ECORCE);
+  }
+}
+
+// Tombe : stèle arrondie gravée d'une croix, tertre devant, mousse dessus.
+// Elle regarde la muraille (vers -x).
+function tombe(pierre, herbe, o, i) {
+  const pose = { x: o.x, z: o.z, rz: o.penche, rx: o.penche * 0.5 };
+  const piece = (geo, pos, couleur, v = 0.06) => {
+    geo.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(pos.x ?? 0, pos.y ?? 0, pos.z ?? 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(pos.rx ?? 0, 0, pos.rz ?? 0)), new THREE.Vector3(1, 1, 1)));
+    place(geo, pose);
+    pierre.push(colorer(geo, couleur, v));
+  };
+  const teinte = PIERRES[i % PIERRES.length];
+  piece(new THREE.BoxGeometry(0.16, 0.62, 0.62), { y: 0.3 }, teinte);
+  piece(new THREE.CylinderGeometry(0.31, 0.31, 0.16, 10), { y: 0.6, rz: Math.PI / 2 }, teinte);
+  piece(new THREE.BoxGeometry(0.02, 0.36, 0.06), { x: -0.085, y: 0.52 }, '#3e3a35');
+  piece(new THREE.BoxGeometry(0.02, 0.06, 0.24), { x: -0.085, y: 0.6 }, '#3e3a35');
+  piece(new THREE.BoxGeometry(0.22, 0.08, 0.72), { y: 0.02 }, PIERRES[(i + 2) % PIERRES.length]);
+  pierre.push(colorer(place(new THREE.IcosahedronGeometry(0.5, 0), { x: o.x - 0.8, y: -0.18, z: o.z, sx: 1.4, sy: 0.4, sz: 0.7 }), '#3a2e24', 0.1));
+  if (i % 2) herbe.push(colorer(place(new THREE.IcosahedronGeometry(0.12, 0), { x: o.x, y: 0.88, z: o.z + 0.1, sy: 0.4 }), FEUILLES[i % 4], 0.1));
+}
+
+// Croix de bois plantée de travers.
+function croix(bois, o) {
+  const pose = (pos) => ({ ...pos, x: o.x + (pos.x ?? 0), z: o.z + (pos.z ?? 0), rz: o.penche * 2 });
+  bois.push(colorer(place(new THREE.BoxGeometry(0.1, 1.25, 0.1), pose({ y: 0.55 })), BOIS[1], 0.1));
+  bois.push(colorer(place(new THREE.BoxGeometry(0.09, 0.1, 0.6), pose({ y: 0.85 })), BOIS[0], 0.1));
+  bois.push(colorer(place(new THREE.IcosahedronGeometry(0.45, 0), { x: o.x - 0.75, y: -0.15, z: o.z, sx: 1.4, sy: 0.4, sz: 0.7 }), '#3a2e24', 0.1));
+}
+
+// Pile de caisses cerclées.
+export function caisses(bois, o) {
+  for (const [dx, dy, dz, c, ry] of [[-0.35, 0, -0.2, 0.8, 0.2], [0.45, 0, 0.15, 0.7, -0.3], [-0.2, 0.8, -0.1, 0.62, 0.5]]) {
+    const pose = { x: o.x + dx, y: dy + c / 2, z: o.z + dz, ry };
+    bois.push(colorer(place(new THREE.BoxGeometry(c, c, c), pose), BOIS[1], 0.12));
+    // Arêtes renforcées.
+    for (const [sx, sy, sz, ex, ey, ez] of [[1.02, 0.08, 1.02, 0, 0.46, 0], [1.02, 0.08, 1.02, 0, -0.46, 0], [0.08, 1, 1.03, 0.47, 0, 0], [0.08, 1, 1.03, -0.47, 0, 0]]) {
+      const geo = new THREE.BoxGeometry(c * sx, c * sy, c * sz).translate(c * ex, c * ey, c * ez);
+      bois.push(colorer(place(geo, pose), BOIS[2], 0.05));
+    }
+  }
+}
+
+// Crâne et os épars.
+function ossements(pierre, x, z, graine) {
+  const os = '#d6cdb0';
+  pierre.push(colorer(place(new THREE.IcosahedronGeometry(0.11, 1), { x, y: 0.09, z, sz: 1.15, ry: graine }), os, 0.05));
+  for (const c of [-1, 1]) {
+    pierre.push(colorer(place(new THREE.BoxGeometry(0.035, 0.03, 0.03), { x: x + Math.cos(graine) * 0.1 + Math.sin(graine) * c * 0.035, y: 0.12, z: z - Math.sin(graine) * 0.1 + Math.cos(graine) * c * 0.035, ry: graine }), '#1c1614'));
+  }
+  for (let k = 0; k < 3; k++) {
+    const a = graine * 2 + k * 2.1, l = 0.35 + hachage(graine, k) * 0.2;
+    const px = x + Math.cos(a) * 0.35, pz = z + Math.sin(a) * 0.35;
+    rameau(pierre, [px, 0.03, pz], [px + Math.cos(a + 1.2) * l, 0.03, pz + Math.sin(a + 1.2) * l], 0.025, 0.025, os);
+  }
+}
+
+// Lierre qui grimpe le long d'un mur : (x, z) le pied de la tige contre la
+// face, (nx, nz) la normale de la face, h la hauteur atteinte.
+function lierre(feuilles, x, z, nx, nz, h, graine) {
+  const tx = -nz, tz = nx;
+  let lateral = 0;
+  const ry = Math.atan2(nx, nz);
+  for (let y = 0.2; y < h; y += 0.16) {
+    lateral += (hachage(y, graine) - 0.5) * 0.25;
+    const largeur = 0.35 + Math.sin((y / h) * Math.PI) * 0.6;
+    for (let k = 0; k < 3; k++) {
+      const d = lateral + (hachage(k, y + graine) - 0.5) * largeur;
+      const geo = new THREE.PlaneGeometry(0.2, 0.18);
+      feuilles.push(colorer(place(geo, {
+        x: x + tx * d + nx * (0.04 + k * 0.01), y: y + hachage(y, k) * 0.1, z: z + tz * d + nz * (0.04 + k * 0.01), ry, rz: hachage(k, y) * 3,
+      }), FEUILLES[Math.floor(hachage(y * 3, k + graine) * 4)], 0.15));
+    }
+  }
+}
+
+// Fissure en zigzag sur une face.
+function fissure(pierre, x, y, z, nx, nz, graine) {
+  const tx = -nz, tz = nx;
+  let d = 0, h = y;
+  for (let k = 0; k < 5; k++) {
+    const pas = 0.25 + hachage(k, graine) * 0.2;
+    const dd = (hachage(graine, k) - 0.5) * 0.35;
+    rameau(pierre, [x + tx * d + nx * 0.035, h, z + tz * d + nz * 0.035], [x + tx * (d + dd) + nx * 0.035, h - pas, z + tz * (d + dd) + nz * 0.035], 0.018 - k * 0.002, 0.012 - k * 0.002, '#2e2b27');
+    d += dd;
+    h -= pas;
+  }
+}
+
+// Les faces des murailles : position le long du mur (a), face intérieure ou
+// extérieure. Rend { x, z, nx, nz } au pied de la face.
+function face(cote, a, dehors) {
+  const s = cote === 'nord' || cote === 'ouest' ? -1 : 1;
+  const d = dehors ? EXT : COUR;
+  const n = dehors ? s : -s;
+  return cote === 'nord' || cote === 'sud' ? { x: a, z: s * d, nx: 0, nz: n } : { x: s * d, z: a, nx: n, nz: 0 };
+}
+
+// Linteau au-dessus d'une porte, entre ses tourelles, avec un écu. Visuel
+// seulement (le relief ne le connaît pas) : assez haut pour le boss.
+function linteau(pierre, tissu, cote) {
+  const s = cote === 'nord' || cote === 'ouest' ? -1 : 1;
+  const surX = cote === 'nord' || cote === 'sud';
+  const milieu = s * (COUR + EXT) / 2;
+  const pose = (a, b, pos) => (surX ? { ...pos, x: a, z: milieu + b } : { ...pos, x: milieu + b, z: a, ry: Math.PI / 2 });
+  pierre.push(colorer(place(new THREE.BoxGeometry(DEMI_PORTE * 2 + 0.3, 0.8, EPAISSEUR_MUR + 0.6), pose(0, 0, { y: 6.6 })), PIERRES[3], 0.06));
+  for (let k = -2; k <= 2; k++) {
+    for (const b of [-1, 1]) pierre.push(colorer(place(new THREE.BoxGeometry(0.6, 0.6, 0.5), pose(k * 1.1, b * (EPAISSEUR_MUR / 2 + 0.05), { y: 7.3 })), PIERRES[(k + 5) % PIERRES.length], 0.05));
+  }
+  // Écu rouge et or, côté champ.
+  const b = s * (EPAISSEUR_MUR / 2 + 0.32);
+  tissu.push(colorer(place(new THREE.BoxGeometry(0.9, 0.7, 0.05), pose(0, b, { y: 6.6 })), '#d9b54a'));
+  tissu.push(colorer(place(new THREE.BoxGeometry(0.74, 0.56, 0.05), pose(0, b + s * 0.02, { y: 6.62 })), '#8e1f24'));
+}
+
 export function creerChateau() {
   const groupe = new THREE.Group();
-  const pierre = [], bois = [], fer = [], ardoises = [], tissu = [], paille = [], herbe = [];
+  const pierre = [], bois = [], fer = [], ardoises = [], tissu = [], paille = [], herbe = [], feuilles = [], fenetres = [];
 
   // Le champ autour, puis les pavés de la cour.
   sol(herbe, 70, 2.5, HERBE, -0.02, (x, z) => Math.max(Math.abs(x), Math.abs(z)) > COUR - 0.5);
+  // Sous les mottes, une terre sombre : entre elles, on ne voit pas le ciel.
+  const terre = new THREE.PlaneGeometry(140, 140);
+  terre.rotateX(-Math.PI / 2);
+  herbe.push(colorer(place(terre, { y: -0.05 }), '#1f2619'));
   sol(pierre, COUR, 1, PAVES, 0, () => true);
   // Les joints entre les pavés : un fond sombre, sinon on voit le ciel au travers.
   const joints = new THREE.PlaneGeometry(COUR * 2, COUR * 2);
@@ -230,6 +384,14 @@ export function creerChateau() {
         bois.push(colorer(place(new THREE.CylinderGeometry(0.35, 0.3, 0.9, 8), { x: o.x + dx, y: 0.45, z: o.z + dz }), BOIS[1], 0.1));
         fer.push(colorer(place(new THREE.CylinderGeometry(0.36, 0.36, 0.06, 8), { x: o.x + dx, y: 0.7, z: o.z + dz }), '#2c2e33'));
       }
+    } else if (o.genre === 'caisses') {
+      caisses(bois, o);
+    } else if (o.genre === 'tombe') {
+      tombe(pierre, herbe, o, Math.round(o.z * 3 + o.x));
+    } else if (o.genre === 'croix') {
+      croix(bois, o);
+    } else if (o.genre === 'arbre') {
+      arbreMort(bois, o.x, o.z, Math.round(o.x * 7 + o.z * 3));
     } else if (o.genre === 'foin') {
       for (const [dx, dy, dz] of [[0, 0.35, 0], [0.9, 0.35, 0.2], [0.45, 1.05, 0.1]]) {
         paille.push(colorer(place(new THREE.BoxGeometry(1, 0.7, 0.7), { x: o.x + dx - 0.4, y: dy, z: o.z + dz }), '#d1b064', 0.15));
@@ -247,6 +409,65 @@ export function creerChateau() {
   }
   fer.push(colorer(place(new THREE.BoxGeometry(0.5, 0.3, 0.9), { x: x1 + 0.9, y: 0.75, z: z0 - 0.6 }), '#2c2e33'));
   bois.push(colorer(place(new THREE.CylinderGeometry(0.25, 0.3, 0.6, 7), { x: x1 + 0.9, y: 0.3, z: z0 - 0.6 }), BOIS[0]));
+
+  // Le temps a passé : lierre, fissures, meurtrières, linteaux des portes.
+  for (const cote of ['nord', 'sud', 'ouest', 'est']) {
+    const porteIci = cote !== 'est';
+    for (const [k, a] of [-14, -9.5, -5, 6, 11, 15.5].entries()) {
+      if (porteIci && Math.abs(a) < DEMI_PORTE + 1.5) continue;
+      const graine = k * 5 + cote.length;
+      const dedans = face(cote, a, false), dehors = face(cote, a + 1.3, true);
+      if (hachage(graine, 1) > 0.35) lierre(feuilles, dedans.x, dedans.z, dedans.nx, dedans.nz, 1.8 + hachage(graine, 2) * 2.4, graine);
+      if (hachage(graine, 3) > 0.45) lierre(feuilles, dehors.x, dehors.z, dehors.nx, dehors.nz, 2.5 + hachage(graine, 4) * 3, graine + 1);
+      if (hachage(graine, 5) > 0.5) fissure(pierre, dedans.x + dedans.nz * 0.8, 3.6, dedans.z + dedans.nx * 0.8, dedans.nx, dedans.nz, graine);
+      const fente = face(cote, a - 1.2, true);
+      pierre.push(colorer(place(new THREE.BoxGeometry(fente.nz ? 0.16 : 0.06, 1.1, fente.nz ? 0.06 : 0.16), { x: fente.x + fente.nx * 0.03, y: 2.9, z: fente.z + fente.nz * 0.03 }), '#141312'));
+    }
+    if (porteIci) linteau(pierre, tissu, cote);
+  }
+  // Fenêtres des tours : quelques-unes éclairées, les autres noires.
+  for (const [i, t] of TOURS.entries()) {
+    for (const [k, y] of [2.8, 5.4].entries()) {
+      for (let j = 0; j < 3; j++) {
+        const a = ((j * 3 + i * 2 + k + 0.5) / 10) * Math.PI * 2;
+        const r = (t.rayon - 0.1) * (1.08 - (0.08 * y) / H_TOUR) * Math.cos(Math.PI / 10) + 0.03;
+        const pos = { x: t.x + Math.sin(a) * r, y, z: t.z + Math.cos(a) * r, ry: a };
+        pierre.push(colorer(place(new THREE.BoxGeometry(0.5, 0.85, 0.06), pos), '#4a4640'));
+        const allumee = hachage(i + j, k) > 0.4;
+        const vitre = place(new THREE.BoxGeometry(0.34, 0.66, 0.08), pos);
+        (allumee ? fenetres : pierre).push(allumee ? vitre : colorer(vitre, '#101014'));
+      }
+    }
+  }
+  // Paille au sol près du foin, de la charrette et de l'étal ; herbe entre
+  // les pavés au pied des murs et hautes herbes dans le champ ; ossements.
+  for (let k = 0; k < 70; k++) {
+    const [cx, cz, r] = [[11, 9, 2.2], [-9, 7, 2.4], [-COUR + 3.5, 9, 2]][k % 3];
+    const a = hachage(k, 3) * Math.PI * 2, d = Math.sqrt(hachage(k, 5)) * r;
+    paille.push(colorer(place(new THREE.BoxGeometry(0.28, 0.012, 0.025), { x: cx + Math.cos(a) * d, y: 0.02, z: cz + Math.sin(a) * d, ry: hachage(k, 7) * 3 }), '#d1b064', 0.2));
+  }
+  const touffe = (x, z, taille, couleurs) => {
+    for (let b = 0; b < 4; b++) {
+      const a = hachage(x, z + b) * 6 + b * 1.7;
+      herbe.push(colorer(place(new THREE.ConeGeometry(0.04 * taille, 0.4 * taille, 3), {
+        x: x + Math.cos(a) * 0.07, y: 0.2 * taille, z: z + Math.sin(a) * 0.07, rx: Math.sin(a) * 0.35, rz: Math.cos(a) * 0.35,
+      }), couleurs[b % couleurs.length], 0.15));
+    }
+  };
+  for (let k = 0; k < 60; k++) {
+    const cote = ['nord', 'sud', 'ouest', 'est'][k % 4];
+    const a = (hachage(k, 11) * 2 - 1) * (COUR - 1);
+    if (cote !== 'est' && Math.abs(a) < DEMI_PORTE + 0.5) continue;
+    const f = face(cote, a, false);
+    touffe(f.x - f.nx * -0.25, f.z - f.nz * -0.25, 0.6 + hachage(k, 13) * 0.5, FEUILLES);
+  }
+  for (let k = 0; k < 160; k++) {
+    const a = hachage(k, 17) * Math.PI * 2, d = EXT + 1.5 + hachage(k, 19) * 11;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    if (Math.max(Math.abs(x), Math.abs(z)) < EXT + 1 || OBSTACLES.some((o) => Math.hypot(o.x - x, o.z - z) < o.rayon + 0.3)) continue;
+    touffe(x, z, 1 + hachage(k, 23) * 1.2, HERBE.map((c) => new THREE.Color(c).multiplyScalar(1.4)));
+  }
+  for (const [k, [x, z]] of [[25.4, -6], [25.2, 3.5], [27.3, 8], [-14, 14.5], [15.5, -15], [-9.8, -10.8]].entries()) ossements(pierre, x, z, k * 1.3 + 0.4);
 
   // Torches : sur le bord intérieur du chemin de ronde, aux portes et aux
   // coins de la terrasse. Flammes et halos brillent dans le noir.
@@ -269,11 +490,23 @@ export function creerChateau() {
   const geoHalos = new THREE.BufferGeometry();
   geoHalos.setAttribute('position', new THREE.Float32BufferAttribute(halos, 3));
   const matHalos = new THREE.PointsMaterial({
-    map: textureHalo(), size: 2.4, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+    map: textureHalo(), color: new THREE.Color(1.8, 1.8, 1.8), size: 1.4, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   const lueurs = new THREE.Points(geoHalos, matHalos);
+  // Des braises montent des torches ; la brume traîne dans le champ.
+  const vie = [
+    creerBraises(torches.map(([x, y, z]) => [x, y + 1.1, z]), 70),
+    creerBrume({ n: 40, rayon: 34, carre: true, sol: () => 0 }),
+  ];
+  groupe.add(...vie);
 
-  const maillages = [fusionner(pierre), fusionner(bois), fusionner(fer, { metalness: 0.4, roughness: 0.5 }), fusionner(ardoises), fusionner(tissu, { side: THREE.DoubleSide }), fusionner(paille), fusionner(herbe, { ombre: false })];
+  const maillages = [
+    fusionner(pierre), fusionner(bois), fusionner(fer, { metalness: 0.4, roughness: 0.5 }), fusionner(ardoises), fusionner(tissu, { side: THREE.DoubleSide }),
+    fusionner(paille), fusionner(herbe, { ombre: false }), fusionner(feuilles, { ombre: false, side: THREE.DoubleSide }),
+  ];
+  // Les fenêtres éclairées brillent de loin, à travers la nuit.
+  const vitres = new THREE.Mesh(fusionnerFlammes(fenetres), new THREE.MeshBasicMaterial({ color: lumineux('#ffae4a', 3.2), fog: false }));
+  maillages.push(vitres);
   groupe.add(...maillages, flamme, lueurs);
   groupe.add(enseigne(x1 + 0.05, 3.55, (z0 + z1) / 2));
   // Les armes en vente, au râtelier contre la muraille.
@@ -288,17 +521,18 @@ export function creerChateau() {
   // de lumières constant d'une carte à l'autre.
   const lampe = new THREE.PointLight('#ffcf85', 9, 12, 1.5);
   lampe.position.set(BOUTIQUE.x - 0.6, 2.7, BOUTIQUE.z);
-  const ampoule = new THREE.Mesh(new THREE.IcosahedronGeometry(0.1, 1), new THREE.MeshBasicMaterial({ color: '#ffd98a' }));
+  const ampoule = new THREE.Mesh(new THREE.IcosahedronGeometry(0.1, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd98a').multiplyScalar(8) }));
   ampoule.position.copy(lampe.position);
   groupe.add(ampoule, lampe);
 
   let temps = 0;
-  groupe.userData.animer = (dt) => {
+  groupe.userData.animer = (dt, nuit) => {
     temps += dt;
+    for (const v of vie) v.userData.animer(dt, nuit);
     // Les flammes vacillent (toutes ensemble : une seule matière).
     const v = 0.85 + Math.sin(temps * 13) * 0.08 + Math.sin(temps * 7.3) * 0.07;
-    matFlamme.color.setRGB(1, 0.62 + v * 0.1, 0.25 + v * 0.05);
-    matHalos.size = 2.2 + v * 0.5;
+    matFlamme.color.setRGB(1, 0.62 + v * 0.1, 0.25 + v * 0.05).multiplyScalar(7);
+    matHalos.size = 1.25 + v * 0.3;
   };
   return groupe;
 }

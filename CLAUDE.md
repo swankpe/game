@@ -98,15 +98,18 @@ message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
 | `src/monde.js` | registre des cartes (`CARTES`, `carteDeManche`, `carte()`), et relief, décor, collisions de l'île |
 | `src/chateau.js` | la cour du château : blocs et rampes (carte de hauteurs), obstacles, sorties, sans Three.js |
 | `src/navigation.js` | champ de distances (Dijkstra sur une grille de 1 m) : les zombies passent les portes et prennent les rampes |
-| `src/rendu-chateau.js` | rendu de la cour, construit depuis les mêmes blocs que la carte |
-| `src/ile.js` | rendu de l'île, ambiances (jour, nuit, Illumination), bascule d'une carte à l'autre |
-| `src/geometrie.js` | pièces low-poly colorées par sommet puis fusionnées |
+| `src/rendu-chateau.js` | rendu de la cour (mêmes blocs que la carte) : lierre, fissures, meurtrières, fenêtres éclairées, cimetière, arbres morts |
+| `src/ile.js` | rendu de l'île (barque échouée, torches, écume, fleurs…), ciel (halo de lune, nuages, étoiles filantes), ambiances, bascule d'une carte à l'autre |
+| `src/ambiance.js` | vie de la nuit : lucioles, braises des torches, brume au ras du sol |
+| `src/post.js` | post-traitement : halo lumineux (bloom) réglé sur `ile.jour`, vignettage, étalonnage de nuit, grain |
+| `src/particules.js` | sang, bave, poussière, étincelles, fumée, douilles, flaques : réserves fixes d'`InstancedMesh` |
+| `src/geometrie.js` | pièces low-poly colorées par sommet puis fusionnées ; `lumineux()` pour ce qui doit rayonner |
 | `src/personnage.js` | perso des joueurs, poses (libre, arme, porte, attache), arme en main |
 | `src/armes.js` | modèles des 4 armes et de la grenade (profils extrudés, biseautés) |
 | `src/apercus.js` | vignettes des armes photographiées au démarrage, pour la boutique et la barre d'armes |
 | `src/projectiles.js` | grenades en vol, découpées en pas de 20 ms |
 | `src/etoiles.js` | étoiles d'amélioration au sol : étoile, halo, colonne de lumière, sans lumière ajoutée |
-| `src/monstres.js` | zombies à l'écran, 4 silhouettes et allures : 6 maillages chacun, géométries partagées |
+| `src/monstres.js` | zombies à l'écran, 5 silhouettes détaillées (visage, dents, mains, lambeaux…) et allures : 6 maillages chacun, géométries partagées |
 | `src/poteau.js` | mât, cordes, lanterne orientable, mannequin de paille |
 | `src/arme.js` | arme à la première personne (mains, changement d'arme, rechargement), éclairs, traînées, explosions |
 | `src/vue.js` | souris verrouillée, regard à la première personne, recul |
@@ -143,7 +146,9 @@ rechargement, `ids` des zombies et `boss` compris), `viser(x, y, z)`, `teleporte
 `poserEtoile(x, z)`, `ameliorerLanterne()` et
 `poserZombie(type, x, z, vitesse, pv)` (immobile par défaut : pratique pour
 photographier un modèle). `etat()` donne aussi `vie`, `vies`, `etoiles`,
-`lanterne` et `niveaux`. Pièges :
+`lanterne` et `niveaux` ; `window.leProtege.jour()` dit où en est le fondu
+(0 : nuit noire, 1 : plein jour) et `rendu()` les compteurs de Three.js.
+Pièges :
 - `#hud` mesure 0×0 (enfants en `position: fixed`) : attendre `#hud .salon`.
 - Cliquer sur une zone libre de la scène : dans une petite fenêtre, le centre
   tombe sur la carte du salon et la souris n'est jamais verrouillée.
@@ -151,6 +156,10 @@ photographier un modèle). `etat()` donne aussi `vie`, `vies`, `etoiles`,
   moitié de la fenêtre : réappeler `viser()` juste après `mouse.down()`.
 - Plusieurs pages WebGL en rendu logiciel font tomber les images par seconde ;
   le pas de temps étant plafonné à 0,1 s, le temps de jeu ralentit d'autant.
+  Les 30 s d'Illumination durent alors plusieurs minutes : pour une capture
+  de nuit, attendre `jour() < 0.01` sans avoir illuminé.
+- `viser()` part de la position de la caméra, mise à jour à l'image suivante :
+  après `teleporter()`, attendre avant de viser.
 - Les zombies sortent de l'eau : sous la surface, le fond marin arrête les
   balles. Viser ceux dont `y > 0`.
 - Les pages d'un même contexte partagent `localStorage` et `BroadcastChannel` :
@@ -221,4 +230,22 @@ photographier un modèle). `etat()` donne aussi `vie`, `vies`, `etoiles`,
   « Standard Protection », sinon les amis tombent sur une connexion Vercel.
 - Three.js r186 : `THREE.Timer` remplace `Clock` ; `PCFSoftShadowMap` n'existe plus.
 - Le décor vient d'une graine fixe (`generateur(20260922)` dans `monde.js`) :
-  tous les joueurs voient la même île sans rien échanger.
+  tous les joueurs voient la même île sans rien échanger. Ajouter un élément
+  de décor **après** les autres tirages, sinon toute l'île change de place.
+- **Halo lumineux (bloom)** : la scène est rendue en HDR, et seul ce qui
+  dépasse le seuil (2,2 la nuit, 6 le jour) rayonne. Une matière qui doit
+  briller (yeux, flammes, fenêtres, lanterne, traceurs) prend une couleur
+  `lumineux(couleur, force)` avec une force de 3 à 8 ; une couleur normale ne
+  brille jamais. Un seuil plus bas faisait baver tout le sable éclairé.
+- Brume, écume : pas de plans à plat posés sur une pente (ils tranchent net
+  dans le sol), mais des nappes qui épousent le relief, bords transparents
+  par sommet (attribut `color` à 4 composantes).
+- Un obstacle ajouté près d'un autre (caisses contre la cabane) crée une
+  poche où les zombies, qui glissent le long des obstacles, restent coincés :
+  laisser au moins un mètre et demi entre deux obstacles, ou les coller.
+  Le test « contourne la cabane » le vérifie.
+- Les fenêtres des tours, les torches et les braises n'éclairent rien : ce
+  sont des matières lumineuses, pas des lumières (nombre de lumières constant).
+- Le linteau des portes du château est un décor sans relief : la carte de
+  hauteurs ne le connaît pas (sinon le passage serait bouché) ; il est posé
+  assez haut pour que le boss passe dessous.

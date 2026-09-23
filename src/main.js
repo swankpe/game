@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { creerPostTraitement } from './post.js';
 import { apparenceAleatoire, nettoyerNom, normaliserApparence } from './apparence.js';
 import { creerAvatars } from './avatars.js';
 import { creerOrbite } from './camera.js';
@@ -57,6 +58,9 @@ rendu.shadowMap.enabled = true;
 rendu.shadowMap.type = THREE.PCFShadowMap;
 rendu.toneMapping = THREE.NeutralToneMapping;
 rendu.toneMappingExposure = 1.05;
+// Plusieurs passes par image (post.js) : on remet les compteurs à zéro
+// nous-mêmes, une fois par image, pour qu'ils les comptent toutes.
+rendu.info.autoReset = false;
 
 const etiquettes = new CSS2DRenderer();
 etiquettes.domElement.className = 'calque-etiquettes';
@@ -65,6 +69,7 @@ canvas.after(etiquettes.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(FOV_CREATION, 1, 0.05, 1200);
 const ile = creerIle(scene);
+const post = creerPostTraitement(rendu, scene, camera);
 const orbite = creerOrbite(camera, canvas);
 const clavier = creerClavier();
 const joueur = creerJoueur();
@@ -110,6 +115,7 @@ function ajusterVue() {
 function redimensionner() {
   const w = innerWidth, h = innerHeight;
   rendu.setSize(w, h, false);
+  post.taille(w, h);
   etiquettes.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -199,7 +205,7 @@ if (codeInvitation) {
 }
 
 if (new URLSearchParams(location.search).has('debug')) {
-  window.leProtege = { ...jeu.debug(), rendu: () => ({ ...rendu.info.render, ...rendu.info.memory }) };
+  window.leProtege = { ...jeu.debug(), rendu: () => ({ ...rendu.info.render, ...rendu.info.memory }), jour: () => ile.jour };
 }
 
 const transport = await choisirTransport();
@@ -376,6 +382,7 @@ redimensionner();
 
 rendu.setAnimationLoop((instant) => {
   horloge.update(instant);
+  rendu.info.reset();
   const dt = Math.min(horloge.getDelta(), 0.1);
   temps += dt;
 
@@ -403,6 +410,6 @@ rendu.setAnimationLoop((instant) => {
   }
   ile.mettreAJour(temps, dt);
 
-  rendu.render(scene, camera);
+  post.rendre(dt, ile.jour);
   etiquettes.render(scene, camera);
 });

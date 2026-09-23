@@ -42,9 +42,9 @@ export function creerEtoilesVue(scene) {
   const geo = new THREE.ExtrudeGeometry(formeEtoile(), { depth: 0.06, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1 });
   geo.center();
   const matiere = new THREE.MeshStandardMaterial({
-    color: '#ffd24a', emissive: '#ffb300', emissiveIntensity: 1.1, roughness: 0.35, metalness: 0.4, flatShading: true, fog: false,
+    color: '#ffd24a', emissive: '#ffb300', emissiveIntensity: 5, roughness: 0.35, metalness: 0.4, flatShading: true, fog: false,
   });
-  const halo = new THREE.SpriteMaterial({ map: textureHalo(), blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true });
+  const halo = new THREE.SpriteMaterial({ map: textureHalo(), color: new THREE.Color(3, 3, 3), blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true });
   const geoColonne = new THREE.CylinderGeometry(0.03, 0.1, 7, 8, 1, true);
   geoColonne.translate(0, 3.5, 0);
   const matColonne = new THREE.MeshBasicMaterial({

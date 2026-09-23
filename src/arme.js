@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { creerModeleArme } from './armes.js';
+import { lumineux } from './geometrie.js';
 import { ARMES } from './regles.js';
 
 const NB_ECLAIRS = 4;
@@ -37,6 +38,33 @@ const CADRAGE = {
   lance: { position: [0.18, -0.21, -0.42], recul: 1.4 },
 };
 
+// Éclair de bouche : une étoile à branches inégales et un dard de flamme,
+// dessinés dans un canvas, en additif et assez vifs pour rayonner.
+function textureEclair(dard) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const halo = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  halo.addColorStop(0, 'rgba(255, 250, 220, 1)');
+  halo.addColorStop(0.25, 'rgba(255, 200, 90, 0.8)');
+  halo.addColorStop(1, 'rgba(255, 120, 30, 0)');
+  g.fillStyle = halo;
+  g.beginPath();
+  if (dard) {
+    g.ellipse(64, 64, 18, 62, 0, 0, Math.PI * 2);
+  } else {
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2;
+      const r = i % 2 ? 16 : 40 + ((i * 37) % 24);
+      g.lineTo(64 + Math.cos(a) * r, 64 + Math.sin(a) * r);
+    }
+  }
+  g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 function std(color, roughness = 0.85) {
   return new THREE.MeshStandardMaterial({ color, roughness, flatShading: true });
 }
@@ -54,6 +82,11 @@ export function creerArme(scene, camera) {
   const peau = std('#e3bf86');
   const tissu = std('#343d6b', 0.9);
   const vues = {};
+  const matEclair = (dard) => new THREE.MeshBasicMaterial({
+    map: textureEclair(dard), color: lumineux('#ffffff', 4), transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  });
+  const etoileEclair = matEclair(false), dardEclair = matEclair(true);
 
   for (const { id } of ARMES) {
     const groupe = new THREE.Group();
@@ -76,11 +109,17 @@ export function creerArme(scene, camera) {
       modele.add(main);
       modele.add(segment(point.clone().add(new THREE.Vector3(0, -0.02, -0.01)), point.clone().add(vers), rayon, tissu));
     }
-    const flamme = new THREE.Mesh(
-      new THREE.OctahedronGeometry(id === 'lance' ? 0.07 : 0.05, 0),
-      new THREE.MeshBasicMaterial({ color: '#ffd27a', transparent: true, opacity: 0.9 }),
-    );
-    flamme.position.copy(bouche).setZ(bouche.z + 0.03);
+    // L'étoile face au canon, et deux dards croisés dans son axe.
+    const taille = id === 'lance' ? 0.26 : id === 'pistolet' ? 0.16 : 0.2;
+    const flamme = new THREE.Group();
+    flamme.add(new THREE.Mesh(new THREE.PlaneGeometry(taille, taille), etoileEclair));
+    for (const r of [0, Math.PI / 2]) {
+      const dard = new THREE.Mesh(new THREE.PlaneGeometry(taille * 0.45, taille * 1.4), dardEclair);
+      dard.rotation.set(Math.PI / 2, r, 0);
+      dard.position.z = taille * 0.55;
+      flamme.add(dard);
+    }
+    flamme.position.copy(bouche).setZ(bouche.z + 0.01);
     flamme.visible = false;
     modele.add(flamme);
     groupe.traverse((o) => {
@@ -106,7 +145,7 @@ export function creerArme(scene, camera) {
   const trainees = Array.from({ length: NB_TRAINEES }, () => {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
-    const ligne = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: '#ffe6a0', transparent: true, opacity: 0 }));
+    const ligne = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: lumineux('#ffe6a0', 5), transparent: true, opacity: 0 }));
     ligne.frustumCulled = false;
     ligne.visible = false;
     scene.add(ligne);
@@ -145,6 +184,8 @@ export function creerArme(scene, camera) {
   let flammeReste = 0;
   let balancement = 0;
   let visible = false;
+  // Balancement : l'arme traîne un peu derrière le regard quand on tourne.
+  const balance = { x: 0, y: 0, lacet: null, tangage: 0 };
   // Rechargement en cours : { t, duree } (secondes), ou null.
   let recharge = null;
 
@@ -190,8 +231,22 @@ export function creerArme(scene, camera) {
       v.cran = (v.cran ?? 0) + Math.PI / 3;
       flammeReste = 0.05;
       v.flamme.rotation.z = Math.random() * Math.PI;
+      v.flamme.scale.setScalar(0.75 + Math.random() * 0.5);
       v.modele.updateWorldMatrix(true, false);
       return v.modele.localToWorld(tampon.copy(v.modele.userData.bouche)).clone();
+    },
+    // Fenêtre d'éjection (monde) et vitesse de la douille : vers la droite et
+    // le haut de l'écran. null pour le lance-grenades.
+    ejection() {
+      const v = vues[affichee];
+      const point = v.modele.userData.ejection;
+      if (!point) return null;
+      v.modele.updateWorldMatrix(true, false);
+      const position = v.modele.localToWorld(point.clone());
+      const e = camera.matrixWorld.elements;
+      const droite = new THREE.Vector3(e[0], e[1], e[2]), haut = new THREE.Vector3(e[4], e[5], e[6]), avant = new THREE.Vector3(-e[8], -e[9], -e[10]);
+      const vitesse = droite.multiplyScalar(1.6 + Math.random() * 0.8).addScaledVector(haut, 1.5 + Math.random() * 0.8).addScaledVector(avant, -0.4);
+      return { position, vitesse };
     },
     eclair(position, force = 1) {
       const e = eclairs[prochainEclair];
@@ -228,7 +283,19 @@ export function creerArme(scene, camera) {
       e.boule.visible = e.fumee.visible = true;
     },
     // marche : vitesse du joueur, pour le balancement de l'arme.
-    mettreAJour(dt, marche = 0) {
+    // regard : { lacet, tangage } de la vue, pour le balancement.
+    mettreAJour(dt, marche = 0, regard = null) {
+      if (regard) {
+        if (balance.lacet === null) balance.lacet = regard.lacet;
+        const dl = Math.atan2(Math.sin(regard.lacet - balance.lacet), Math.cos(regard.lacet - balance.lacet));
+        const dtg = regard.tangage - balance.tangage;
+        balance.lacet = regard.lacet;
+        balance.tangage = regard.tangage;
+        const k = 1 - Math.exp(-dt * 9);
+        const cible = (v) => Math.max(-0.035, Math.min(0.035, dt > 0 ? v / dt * 0.006 : 0));
+        balance.x += (cible(dl) - balance.x) * k;
+        balance.y += (cible(dtg) - balance.y) * k;
+      }
       // Changement d'arme : l'ancienne descend, la nouvelle remonte.
       if (affichee !== voulue) {
         abaisse = Math.min(1, abaisse + dt / DUREE_BASCULE);
@@ -272,12 +339,13 @@ export function creerArme(scene, camera) {
       // chargeur se tourne vers la main gauche) sans lever le canon : relevé,
       // un fusil traverserait tout l'écran.
       v.groupe.position.set(
-        v.repos.x + Math.sin(balancement) * 0.012 * ampleur - bascule * 0.02,
-        v.repos.y + Math.abs(Math.cos(balancement)) * 0.014 * ampleur - abaisse * 0.25 - bascule * 0.06,
+        v.repos.x + Math.sin(balancement) * 0.012 * ampleur - bascule * 0.02 + balance.x,
+        v.repos.y + Math.abs(Math.cos(balancement)) * 0.014 * ampleur - abaisse * 0.25 - bascule * 0.06 - balance.y,
         v.repos.z + recul * 0.05,
       );
-      v.groupe.rotation.x = recul * 0.16 - abaisse * 0.7 + bascule * 0.06;
-      v.groupe.rotation.z = -bascule * 0.5;
+      v.groupe.rotation.x = recul * 0.16 - abaisse * 0.7 + bascule * 0.06 - balance.y * 2;
+      v.groupe.rotation.y = balance.x * 3;
+      v.groupe.rotation.z = -bascule * 0.5 + balance.x * 2;
       flammeReste -= dt;
       v.flamme.visible = flammeReste > 0;
 
@@ -303,7 +371,7 @@ export function creerArme(scene, camera) {
         const r = e.rayon * (0.25 + 0.75 * Math.sqrt(Math.min(f * 3, 1)));
         e.boule.scale.setScalar(r * 0.8);
         e.boule.material.opacity = Math.max(0, 0.9 - f * 2.2);
-        e.boule.material.color.setHSL(e.teinte - f * 0.06, 1, 0.65 - f * 0.3);
+        e.boule.material.color.setHSL(e.teinte - f * 0.06, 1, 0.65 - f * 0.3).multiplyScalar(5);
         e.fumee.scale.setScalar(r * (0.6 + f * 0.6));
         e.fumee.position.y += dt * 0.8;
         e.fumee.material.opacity = Math.sin(Math.min(f * 1.2, 1) * Math.PI) * 0.55;

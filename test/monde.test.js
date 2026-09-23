@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  APPARITION, CABANE, DECOR, PONTON, RAYON_JOUEUR, estPraticable, hauteurSol, hauteurTerrain, rayonIle, resoudreCollisions,
+  APPARITION, BOUTIQUE, CABANE, CARTES, DECOR, PONTON, RAYON_JOUEUR, estPraticable, hauteurSol, hauteurTerrain, rayonIle, resoudreCollisions,
 } from '../src/monde.js';
 
 test("le rivage est au niveau de l'eau, le large en dessous", () => {
@@ -40,4 +40,20 @@ test('les troncs et la cabane repoussent le joueur', () => {
 test('le décor est identique à chaque chargement (même graine pour tous les joueurs)', async () => {
   const autre = await import(`../src/monde.js?rechargement=${Date.now()}`);
   assert.deepEqual(autre.DECOR, DECOR);
+});
+
+test('la barque, les torches et les caisses bloquent, sans gêner la boutique ni le poteau', () => {
+  assert.ok(DECOR.epave, 'une barque échouée');
+  assert.ok(DECOR.torches.length >= 4 && DECOR.caisses.length >= 1);
+  const e = DECOR.epave;
+  const r = resoudreCollisions(e.x + 0.05, e.z);
+  // Repoussé hors de la coque (0,75 m de demi-largeur au milieu).
+  assert.ok(Math.hypot(r.x - e.x, r.z - e.z) >= 0.75, 'on ne traverse pas la barque');
+  assert.ok(hauteurTerrain(e.x, e.z) > -0.2, 'elle est échouée sur le sable');
+  for (const t of DECOR.torches) {
+    const p = resoudreCollisions(t.x + 0.01, t.z);
+    assert.ok(Math.hypot(p.x - t.x, p.z - t.z) >= 0.15 + RAYON_JOUEUR - 1e-9);
+  }
+  const poteau = CARTES[0].poteau;
+  for (const p of [BOUTIQUE, poteau]) assert.deepEqual(resoudreCollisions(p.x, p.z), { x: p.x, z: p.z });
 });

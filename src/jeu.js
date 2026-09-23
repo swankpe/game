@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { genererApercus } from './apercus.js';
 import { creerArme } from './arme.js';
 import { creerEtoilesVue } from './etoiles.js';
+import { creerParticules } from './particules.js';
 import { activerCarte, carte } from './monde.js';
 import { creerMonstresVue } from './monstres.js';
 import { creerMusique } from './musique.js';
@@ -106,6 +107,15 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   const projectiles = creerProjectiles(scene);
   const musique = creerMusique();
   const etoiles = creerEtoilesVue(scene);
+  const particules = creerParticules(scene);
+  // Ce qui gicle d'un zombie : du sang, de la bave pour un bouffi, de l'eau
+  // croupie pour le Roi Noyé ; au sol, du sable sur l'île, de la pierre au château.
+  const giclee = (type) => (type?.explosif ? 'bave' : type?.boss ? 'noye' : 'sang');
+  const matiereSol = () => (carte().id === 'ile' ? 'sable' : 'pierre');
+  monstres.quandMeurt((position, type) => {
+    particules.eclabousser(position, giclee(type), type.explosif ? 26 : 12);
+    particules.flaque(position, giclee(type), 0.35 + type.largeur * 0.3);
+  });
   const apercus = genererApercus(rendu, ARMES.map((a) => a.id));
 
   let monId = null;
@@ -293,6 +303,9 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     const bouche = arme.tirer();
     arme.eclair(bouche, a.projectile ? 1.6 : 1);
     sonTir(1, a.id);
+    particules.fumee(bouche, a.projectile ? 0.1 : 0.035);
+    const ejection = arme.ejection();
+    if (ejection) particules.douille(ejection.position, ejection.vitesse);
     // Le recul relève le regard et l'écarte : en rafale, il s'accumule.
     vue.reculer(a.recul * (0.8 + Math.random() * 0.4), (Math.random() - 0.5) * 2 * a.reculLateral);
     evasement = Math.min(evasement + a.evasement, a.evasementMax);
@@ -312,11 +325,15 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
 
     const o = camera.getWorldPosition(new THREE.Vector3());
     const d = directionTir(dispersion);
-    const portee = distanceSol(o, d, a.portee) ?? a.portee;
+    const sol = distanceSol(o, d, a.portee);
+    const portee = sol ?? a.portee;
     const touche = monstres.toucher([o.x, o.y, o.z], d, portee);
     const distance = touche ? touche.distance : portee;
     const fin = new THREE.Vector3(o.x + d[0] * distance, o.y + d[1] * distance, o.z + d[2] * distance);
     arme.trainee(bouche, fin);
+    const sens = new THREE.Vector3(d[0], d[1], d[2]);
+    if (touche) particules.impact(fin, sens, giclee(monstres.typeDe(touche.id)));
+    else if (sol !== null) particules.impact(fin, sens, matiereSol());
     const tir = [bouche.x, bouche.y, bouche.z, fin.x, fin.y, fin.z].map((x) => arrondi(x));
     if (touche) {
       const dg = a.degats * (touche.tete ? MULTIPLICATEUR_TETE : 1);
@@ -343,6 +360,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   // Effet d'une explosion, grenade ou bouffi : lumière, son, secousse.
   function effetExplosion(position, rayon, genre) {
     arme.explosion(position, rayon, genre);
+    particules.eclabousser(position, genre === 'bouffi' ? 'bave' : matiereSol(), genre === 'bouffi' ? 30 : 20);
+    for (let i = 0; i < 4; i++) particules.fumee(position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2, 0.3, (Math.random() - 0.5) * 2)), 0.5);
     const distance = position.distanceTo(camera.position);
     const volume = Math.max(0.15, 1 - distance / 60);
     if (genre === 'bouffi') sonEclatement(volume);
@@ -1141,7 +1160,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           phase: monde.phase, manche: monde.manche, reste: monde.reste, pv: monde.pv, protege: monde.protege,
           porteur: monde.poteau.porteur, poteau: [monde.poteau.x, monde.poteau.z], tues: monde.tues,
           illumination: monde.illumination, recharge: monde.recharge, monId, hote: estHote(), role: role(),
-          zombies: monstres.cibles().map((c) => [c.x, c.y, c.z]),
+          zombies: monstres.cibles().map((c) => [c.x, c.y, c.z, c.id]),
           types: monde.monstres.map((m) => TYPES_ZOMBIES[m.k ?? 0].id),
           ids: monde.monstres.map((m) => m.id),
           munitions: { ...munitions },
@@ -1305,8 +1324,9 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       }
       secousse = Math.max(0, secousse - dt * 2.5);
       arme.afficher(fps && r !== 'protege' && !jePorte() && !aTerre());
-      arme.mettreAJour(dt, joueur.etat.vitesse);
+      arme.mettreAJour(dt, joueur.etat.vitesse, { lacet: vue.lacet, tangage: vue.tangage });
       monstres.mettreAJour(dt, !!sim);
+      particules.mettreAJour(dt);
       etoiles.appliquer(monde.phase === 'attente' ? [] : monde.etoiles ?? []);
       etoiles.mettreAJour(dt);
       // La lanterne améliorée éclaire plus loin, et la nuit recule d'autant.
@@ -1324,10 +1344,17 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           }
           const [ox, oy, oz, fx, fy, fz, m] = tir.t;
           const o = new THREE.Vector3(ox, oy, oz);
+          const f = new THREE.Vector3(fx, fy, fz);
           arme.eclair(o);
-          arme.trainee(o, new THREE.Vector3(fx, fy, fz));
+          arme.trainee(o, f);
           sonTir(Math.max(0, 0.6 - o.distanceTo(camera.position) / 70), tir.idArme);
-          if (Number.isInteger(m)) monstres.secouer(m);
+          const sens = f.clone().sub(o).normalize();
+          if (Number.isInteger(m)) {
+            monstres.secouer(m);
+            particules.impact(f, sens, giclee(monstres.typeDe(m)));
+          } else if (fy - carte().solBalles(fx, fz) < 0.3) {
+            particules.impact(f, sens, matiereSol());
+          }
         }
         tirsDifferes = restants;
       }

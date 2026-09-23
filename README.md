@@ -66,7 +66,9 @@ mais les zombies savent prendre les escaliers.
 Au centre, une **terrasse** de 4 m entourée d'un muret : c'est le meilleur
 endroit pour le poteau, la lanterne y éclaire toute la cour. On y monte par
 une seule rampe, au sud, face à la porte : à défendre. L'armurerie est un étal
-adossé à la muraille ouest.
+adossé à la muraille ouest. Devant la muraille est (la seule sans porte), un
+vieux cimetière : ses tombes et ses arbres morts bloquent le passage, les
+zombies les contournent.
 
 ### Le boss : le Roi Noyé
 
@@ -208,6 +210,12 @@ Pour jouer en ligne depuis ton poste, copie `.env.example` en `.env.local` et
 remplis les deux valeurs.
 
 ## Bon à savoir
+
+- **Tout est dessiné par le code** : pas un modèle 3D, pas une texture, pas un
+  son à télécharger. Les torches, les fenêtres des tours, les yeux des
+  zombies et les étoiles rayonnent dans la nuit (halo lumineux) ; lucioles,
+  braises, brume, sang et douilles sont des particules. Sur une petite carte
+  graphique, c'est le halo qui coûte le plus.
 
 - **Qui fait tourner les zombies ?** Le navigateur du premier joueur du salon
   (l'hôte). S'il part, le suivant reprend la partie là où elle en était.

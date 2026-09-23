@@ -5,10 +5,11 @@
 // l'on montre l'une ou l'autre selon la carte de la manche.
 
 import * as THREE from 'three';
+import { creerBraises, creerBrume, creerLucioles } from './ambiance.js';
 import { creerModeleArme } from './armes.js';
-import { colorer, fusionner, hachage, place } from './geometrie.js';
-import { CABANE, CARTES, DECOR, PONTON, estHerbe, hauteurTerrain } from './monde.js';
-import { creerChateau } from './rendu-chateau.js';
+import { colorer, fusionner, hachage, lumineux, place } from './geometrie.js';
+import { CABANE, CARTES, DECOR, PONTON, estHerbe, hauteurTerrain, rayonIle } from './monde.js';
+import { caisses, creerChateau } from './rendu-chateau.js';
 
 const TEINTES = {
   herbe: '#8dba58',
@@ -255,7 +256,7 @@ function creerCabane() {
     groupe.add(arme);
   }
   // Une lampe au-dessus du comptoir : on retrouve l'armurerie dans le noir.
-  const ampoule = new THREE.Mesh(new THREE.IcosahedronGeometry(0.08, 1), new THREE.MeshBasicMaterial({ color: '#ffd98a' }));
+  const ampoule = new THREE.Mesh(new THREE.IcosahedronGeometry(0.08, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd98a').multiplyScalar(8) }));
   ampoule.position.set(avant + 0.25, y + hMur - 0.3, cz);
   const lampe = new THREE.PointLight('#ffcf85', 9, 11, 1.5);
   lampe.position.copy(ampoule.position);
@@ -325,6 +326,307 @@ function creerBouees() {
   return bouees;
 }
 
+// La barque échouée : un demi-tube effilé aux deux bouts, couché sur le
+// flanc et à moitié ensablé, ses membrures, ses bancs, une rame à côté.
+function creerEpave(e) {
+  const long = 1.7, bois = [];
+  const coque = new THREE.CylinderGeometry(0.75, 0.75, long * 2, 12, 10, true, Math.PI / 2, Math.PI).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
+  const effiler = (x) => 1 - (x / long) ** 2 * 0.92;
+  const pos = coque.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const f = effiler(pos.getX(i));
+    pos.setY(i, pos.getY(i) * f * 0.62);
+    pos.setZ(i, pos.getZ(i) * f);
+  }
+  coque.computeVertexNormals();
+  const maillageCoque = new THREE.Mesh(colorer(coque, '#7a6248', 0.14), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, side: THREE.DoubleSide }));
+  maillageCoque.castShadow = maillageCoque.receiveShadow = true;
+  for (const x of [-1.1, -0.4, 0.3, 1]) {
+    const f = effiler(x);
+    const membrure = new THREE.TorusGeometry(0.72 * f, 0.035, 3, 8, Math.PI).rotateZ(Math.PI).rotateY(Math.PI / 2).scale(1, 0.62, 1).translate(x, 0, 0);
+    bois.push(colorer(membrure, TEINTES.boisSombre, 0.1));
+  }
+  for (const x of [-0.6, 0.65]) bois.push(colorer(place(new THREE.BoxGeometry(0.28, 0.05, 1.3 * effiler(x)), { x, y: -0.12 }), TEINTES.bois[1], 0.1));
+  bois.push(colorer(place(new THREE.BoxGeometry(long * 2 + 0.1, 0.06, 0.08), { y: -0.44 }), TEINTES.boisSombre, 0.1));
+  // Planches arrachées.
+  for (const [x, rz, ry] of [[1.35, 0.8, 0.3], [-1.45, -0.5, -0.4]]) bois.push(colorer(place(new THREE.BoxGeometry(0.7, 0.03, 0.12), { x, y: 0.05, z: 0.35, rz, ry }), '#8a7054', 0.1));
+  const groupe = new THREE.Group();
+  groupe.add(maillageCoque, fusionner(bois));
+  groupe.position.set(e.x, hauteurTerrain(e.x, e.z) + 0.12, e.z);
+  groupe.rotation.order = 'YXZ';
+  groupe.rotation.set(e.gite, -e.cap, 0);
+  // La rame et un cordage enroulé, sur le sable.
+  const sable = [];
+  const cote = [Math.cos(e.cap + Math.PI / 2), Math.sin(e.cap + Math.PI / 2)];
+  const [rx, rz] = [e.x + cote[0] * 1.5, e.z + cote[1] * 1.5];
+  sable.push(colorer(place(new THREE.CylinderGeometry(0.03, 0.03, 2.2, 5), { x: rx, y: hauteurTerrain(rx, rz) + 0.04, z: rz, rz: Math.PI / 2, ry: -e.cap + 0.3 }), TEINTES.bois[0], 0.1));
+  const [px, pz] = [rx + Math.cos(e.cap - 0.3) * 1.2, rz + Math.sin(e.cap - 0.3) * 1.2];
+  sable.push(colorer(place(new THREE.BoxGeometry(0.5, 0.025, 0.16), { x: px, y: hauteurTerrain(px, pz) + 0.04, z: pz, ry: -e.cap + 0.3 }), TEINTES.bois[0], 0.1));
+  for (let k = 0; k < 3; k++) {
+    const [cx, cz] = [e.x - cote[0] * 1.6, e.z - cote[1] * 1.6];
+    sable.push(colorer(place(new THREE.TorusGeometry(0.22 - k * 0.05, 0.03, 3, 10), { x: cx, y: hauteurTerrain(cx, cz) + 0.04 + k * 0.04, z: cz, rx: Math.PI / 2 }), '#b8a47a', 0.1));
+  }
+  return new THREE.Group().add(groupe, fusionner(sable));
+}
+
+function creerBoisFlotte() {
+  const parties = [];
+  for (const [i, b] of DECOR.bois.entries()) {
+    const y = hauteurTerrain(b.x, b.z) + b.rayon * 0.6;
+    parties.push(colorer(place(new THREE.CylinderGeometry(b.rayon * 0.8, b.rayon, b.longueur, 6), { x: b.x, y, z: b.z, rz: Math.PI / 2, ry: b.cap }), '#b5a58a', 0.12));
+    // Un chicot de branche.
+    const d = (hachage(i, 3) - 0.5) * b.longueur * 0.6;
+    parties.push(colorer(place(new THREE.CylinderGeometry(0.02, b.rayon * 0.5, 0.35, 4), {
+      x: b.x + Math.cos(b.cap) * d, y: y + 0.12, z: b.z - Math.sin(b.cap) * d, rx: 0.6, ry: b.cap,
+    }), '#a8987c', 0.1));
+  }
+  return fusionner(parties);
+}
+
+// Torches de bambou : leurs flammes brillent (sans éclairer), des braises
+// s'en échappent.
+function creerTorchesTiki() {
+  const bois = [], flammes = [], foyers = [];
+  for (const t of DECOR.torches) {
+    const sol = hauteurTerrain(t.x, t.z);
+    for (let k = 0; k < 3; k++) {
+      bois.push(colorer(place(new THREE.CylinderGeometry(0.045, 0.05, 0.62, 6), { x: t.x, y: sol + 0.31 + k * 0.62, z: t.z }), k % 2 ? '#b89a5a' : '#a88a4c', 0.08));
+      bois.push(colorer(place(new THREE.CylinderGeometry(0.056, 0.056, 0.04, 6), { x: t.x, y: sol + 0.62 + k * 0.62, z: t.z }), '#7a6238'));
+    }
+    bois.push(colorer(place(new THREE.CylinderGeometry(0.13, 0.06, 0.26, 7), { x: t.x, y: sol + 1.98, z: t.z }), '#6b4a2b', 0.12));
+    flammes.push(place(new THREE.ConeGeometry(0.13, 0.42, 5), { x: t.x, y: sol + 2.3, z: t.z }));
+    foyers.push([t.x, sol + 2.35, t.z]);
+  }
+  const matFlamme = new THREE.MeshBasicMaterial({ color: '#ffb347', fog: false });
+  const geoFlammes = new THREE.BufferGeometry();
+  geoFlammes.setAttribute('position', new THREE.Float32BufferAttribute(flammes.flatMap((g) => [...g.toNonIndexed().attributes.position.array]), 3));
+  const halos = new THREE.BufferGeometry();
+  halos.setAttribute('position', new THREE.Float32BufferAttribute(foyers.flat(), 3));
+  const matHalos = new THREE.PointsMaterial({
+    map: textureHalo(), color: new THREE.Color(1.8, 1.8, 1.8), size: 1.4, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+  });
+  const braises = creerBraises(foyers, 36);
+  const groupe = new THREE.Group().add(fusionner(bois), new THREE.Mesh(geoFlammes, matFlamme), new THREE.Points(halos, matHalos), braises);
+  let temps = 0;
+  groupe.userData.animer = (dt, nuit) => {
+    temps += dt;
+    const v = 0.85 + Math.sin(temps * 12) * 0.08 + Math.sin(temps * 7.9) * 0.07;
+    matFlamme.color.setRGB(1, 0.62 + v * 0.1, 0.25 + v * 0.05).multiplyScalar(7);
+    matHalos.size = 1.25 + v * 0.3;
+    braises.userData.animer(dt, nuit);
+  };
+  return groupe;
+}
+
+function textureHalo() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const d = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  d.addColorStop(0, 'rgba(255, 210, 130, 1)');
+  d.addColorStop(0.3, 'rgba(255, 150, 60, 0.5)');
+  d.addColorStop(1, 'rgba(255, 120, 40, 0)');
+  g.fillStyle = d;
+  g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+const PETALES = ['#e84a5f', '#ffd166', '#f4f1de', '#b388eb', '#ff8c42'];
+
+// Fougères, fleurs, coquillages, étoiles de mer, caisses : les petites choses.
+function creerPetitDecor() {
+  const plantes = [], sable = [], bois = [];
+  for (const [i, p] of DECOR.plantes.entries()) {
+    const y = hauteurTerrain(p.x, p.z);
+    if (p.genre === 'fougere') {
+      for (let k = 0; k < 7; k++) {
+        const geo = geometriePalme(0.55 * p.taille * (0.8 + hachage(i, k) * 0.4));
+        place(geo, { x: p.x, y: y + 0.05, z: p.z, ry: p.rotation + k * 0.9, rz: 0.55 + hachage(k, i) * 0.4 });
+        plantes.push(colorer(geo, TEINTES.palmes[(i + k) % 3], 0.12));
+      }
+    } else {
+      const h = 0.25 + p.taille * 0.2;
+      plantes.push(colorer(place(new THREE.CylinderGeometry(0.008, 0.012, h, 3), { x: p.x, y: y + h / 2, z: p.z }), '#4d9130'));
+      const couleur = PETALES[Math.floor(p.teinte * PETALES.length)];
+      for (let k = 0; k < 5; k++) {
+        const a = p.rotation + (k / 5) * Math.PI * 2;
+        plantes.push(colorer(place(new THREE.IcosahedronGeometry(0.04, 0), { x: p.x + Math.cos(a) * 0.045, y: y + h, z: p.z + Math.sin(a) * 0.045, sy: 0.35 }), couleur, 0.1));
+      }
+      plantes.push(colorer(place(new THREE.IcosahedronGeometry(0.025, 0), { x: p.x, y: y + h + 0.01, z: p.z }), '#f2c14e'));
+    }
+  }
+  for (const [i, c] of DECOR.coquillages.entries()) {
+    const y = hauteurTerrain(c.x, c.z);
+    if (c.genre === 'etoile') {
+      for (let k = 0; k < 5; k++) {
+        const a = c.rotation + (k / 5) * Math.PI * 2;
+        sable.push(colorer(place(new THREE.ConeGeometry(0.025 * c.taille, 0.1 * c.taille, 3), {
+          x: c.x + Math.cos(a) * 0.045 * c.taille, y: y + 0.015, z: c.z + Math.sin(a) * 0.045 * c.taille, rx: Math.PI / 2, rz: a - Math.PI / 2, sz: 0.4,
+        }), c.teinte > 0.5 ? '#e0703a' : '#c8453a', 0.1));
+      }
+    } else {
+      sable.push(colorer(place(new THREE.ConeGeometry(0.05 * c.taille, 0.06 * c.taille, 7), { x: c.x, y: y + 0.02, z: c.z, rx: 1.2, ry: c.rotation }), ['#f3e6d0', '#f2c9b8', '#e8d2a6'][i % 3], 0.1));
+    }
+  }
+  for (const c of DECOR.caisses) {
+    // Les caisses sont dessinées sur un sol en y = 0 : on les pose sur le sable.
+    const debut = bois.length;
+    caisses(bois, { x: c.x, z: c.z });
+    for (const g of bois.slice(debut)) g.translate(0, hauteurTerrain(c.x, c.z) - 0.05, 0);
+  }
+  return new THREE.Group().add(fusionner(plantes, { ombre: false, side: THREE.DoubleSide }), fusionner(sable, { ombre: false }), fusionner(bois));
+}
+
+// L'écume au bord de l'eau : un ruban blanc sur la ligne du rivage, qui
+// avance et recule avec les vagues. Deux rubans, en décalé.
+function creerEcume() {
+  const n = 160;
+  const rivage = [];
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    // Le rayon où le sable passe sous l'eau, par dichotomie.
+    let bas = rayonIle(a) * 0.8, haut = rayonIle(a) * 1.3;
+    for (let k = 0; k < 20; k++) {
+      const m = (bas + haut) / 2;
+      if (hauteurTerrain(Math.cos(a) * m, Math.sin(a) * m) > 0.03) bas = m;
+      else haut = m;
+    }
+    rivage.push([a, bas]);
+  }
+  const rubans = [0, 1].map((r) => {
+    const positions = [], couleurs = [], indices = [];
+    for (const [i, [a, rayon]] of rivage.entries()) {
+      for (const [k, d] of [-0.7, 0.2 + r * 0.5, 1.1 + r * 0.6].entries()) {
+        const x = Math.cos(a) * (rayon + d), z = Math.sin(a) * (rayon + d);
+        positions.push(x, Math.max(hauteurTerrain(x, z), 0) + 0.06, z);
+        const alpha = k === 1 ? 0.35 + 0.65 * hachage(i * 0.37, r) ** 2 : 0;
+        couleurs.push(1, 1, 1, alpha);
+      }
+      if (i < n) {
+        const b = i * 3;
+        indices.push(b, b + 3, b + 1, b + 1, b + 3, b + 4, b + 1, b + 4, b + 2, b + 2, b + 4, b + 5);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(couleurs, 4));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, depthWrite: false, opacity: 0.8 }));
+    m.renderOrder = 1;
+    return m;
+  });
+  const groupe = new THREE.Group().add(...rubans);
+  groupe.userData.animer = (t) => {
+    for (const [r, m] of rubans.entries()) {
+      const vague = Math.sin(t * 0.9 + r * 2.2);
+      m.scale.set(1 + vague * 0.01, 1, 1 + vague * 0.01);
+      m.material.opacity = 0.45 + 0.35 * Math.max(0, -vague);
+    }
+  };
+  return groupe;
+}
+
+// Le ciel de nuit : halo de la lune, nuages qui dérivent, étoiles filantes.
+function textureDouce(couleur, doux = 0.4) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const d = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  d.addColorStop(0, couleur);
+  d.addColorStop(doux, couleur.replace(/[\d.]+\)$/, '0.35)'));
+  d.addColorStop(1, couleur.replace(/[\d.]+\)$/, '0)'));
+  g.fillStyle = d;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+
+function textureNuage(graine) {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const g = c.getContext('2d');
+  for (let k = 0; k < 16; k++) {
+    const x = 50 + hachage(k, graine) * 156, y = 48 + hachage(graine, k) * 32, r = 16 + hachage(k + 9, graine) * 26;
+    const d = g.createRadialGradient(x, y, 0, x, y, r);
+    d.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+    d.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    g.fillStyle = d;
+    g.fillRect(0, 0, 256, 128);
+  }
+  // Bords toujours fondus : on ne garde que l'intérieur d'une ellipse floue.
+  g.globalCompositeOperation = 'destination-in';
+  g.setTransform(2, 0, 0, 1, 0, 0);
+  const masque = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  masque.addColorStop(0.6, 'rgba(255, 255, 255, 1)');
+  masque.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  g.fillStyle = masque;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+
+function creerCielNocturne(lune) {
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: textureDouce('rgba(200, 215, 255, 1)', 0.12), color: '#9fb2e6', transparent: true, opacity: 0, depthWrite: false, fog: false, blending: THREE.AdditiveBlending,
+  }));
+  halo.scale.setScalar(150);
+  halo.position.copy(lune.position);
+  const nuages = new THREE.Group();
+  const matieres = [];
+  for (let i = 0; i < 9; i++) {
+    const mat = new THREE.SpriteMaterial({ map: textureNuage(i + 1), color: '#ffffff', transparent: true, opacity: 0, depthWrite: false, fog: false });
+    matieres.push(mat);
+    const nuage = new THREE.Sprite(mat);
+    const a = (i / 9) * Math.PI * 2 + hachage(i, 2), h = 70 + hachage(i, 3) * 120;
+    nuage.position.set(Math.cos(a) * 430, h, Math.sin(a) * 430);
+    nuage.scale.set(170 + hachage(i, 4) * 120, 60 + hachage(i, 5) * 30, 1);
+    nuages.add(nuage);
+  }
+  // Étoile filante : un trait lumineux, de temps en temps.
+  const trainee = new THREE.BufferGeometry();
+  trainee.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
+  trainee.setAttribute('color', new THREE.Float32BufferAttribute([4, 4, 4.5, 0, 0, 0], 3));
+  const filante = new THREE.Line(trainee, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  filante.frustumCulled = false;
+  filante.visible = false;
+  const vol = { attente: 6, t: 0, depart: new THREE.Vector3(), sens: new THREE.Vector3() };
+  const nuit = new THREE.Color('#1c2436'), jour = new THREE.Color('#ffffff');
+  const groupe = new THREE.Group().add(halo, nuages, filante);
+  groupe.userData.animer = (dt, noirceur, opaciteLune) => {
+    halo.material.opacity = opaciteLune * 0.55;
+    halo.visible = opaciteLune > 0.01;
+    nuages.rotation.y += dt * 0.004;
+    for (const m of matieres) {
+      m.color.copy(jour).lerp(nuit, noirceur);
+      m.opacity = 0.75;
+    }
+    // Une étoile filante toutes les quinze à quarante secondes, la nuit.
+    vol.attente -= dt;
+    if (vol.attente <= 0 && noirceur > 0.8) {
+      vol.attente = 15 + Math.random() * 25;
+      vol.t = 0.9;
+      const a = Math.random() * Math.PI * 2;
+      vol.depart.set(Math.cos(a) * 380, 160 + Math.random() * 120, Math.sin(a) * 380);
+      vol.sens.set(-Math.sin(a) * (Math.random() < 0.5 ? 1 : -1), -0.35, Math.cos(a)).normalize();
+    }
+    filante.visible = vol.t > 0;
+    if (!filante.visible) return;
+    vol.t -= dt;
+    const avance = (0.9 - vol.t) * 260;
+    const tete = vol.depart.clone().addScaledVector(vol.sens, avance);
+    const queue = tete.clone().addScaledVector(vol.sens, -Math.min(avance, 45));
+    trainee.attributes.position.setXYZ(0, tete.x, tete.y, tete.z);
+    trainee.attributes.position.setXYZ(1, queue.x, queue.y, queue.z);
+    trainee.attributes.position.needsUpdate = true;
+    const e = Math.min(1, vol.t / 0.3) * 4;
+    trainee.attributes.color.setXYZ(0, e, e, e * 1.1);
+    trainee.attributes.color.needsUpdate = true;
+  };
+  return groupe;
+}
+
 // Trois ambiances : le jour pour créer son perso, la nuit pendant les
 // manches, et l'Illumination du protégé qui éclaire toute la carte.
 const AMBIANCES = {
@@ -389,12 +691,37 @@ export function creerIle(scene) {
   );
   lune.position.copy(soleil.position).normalize().multiplyScalar(480);
   scene.add(lune);
+  const cielNocturne = creerCielNocturne(lune);
+  scene.add(cielNocturne);
 
   const mer = creerMer();
   const bouees = creerBouees();
+  const ecume = creerEcume();
+  const tiki = creerTorchesTiki();
+  // La nuit sur l'île : lucioles au-dessus de l'herbe, brume sur le sable.
+  const vieIle = [
+    creerLucioles(64, (i) => {
+      for (let k = 0; ; k++) {
+        const a = hachage(i, k + 40) * Math.PI * 2, r = 3 + hachage(k + 40, i) * 22;
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        if (estHerbe(x, z) || k > 20) return [x, hauteurTerrain(x, z) + 0.5 + hachage(i, k) * 1.4, z];
+      }
+    }),
+    creerBrume({ rayon: 36, sol: (x, z) => Math.max(hauteurTerrain(x, z), 0.05) }),
+  ];
   const decors = {
-    ile: new THREE.Group().add(creerTerrain(), mer, creerPalmiers(), creerRochers(), creerHerbes(), creerCabane(), creerPonton(), ...bouees),
+    ile: new THREE.Group().add(
+      creerTerrain(), mer, ecume, creerPalmiers(), creerRochers(), creerHerbes(), creerCabane(), creerPonton(), ...bouees, ...vieIle,
+      tiki, creerBoisFlotte(), creerPetitDecor(), ...(DECOR.epave ? [creerEpave(DECOR.epave)] : []),
+    ),
     chateau: creerChateau(),
+  };
+  let tempsIle = 0;
+  decors.ile.userData.animer = (dt, nuit) => {
+    tempsIle += dt;
+    for (const v of vieIle) v.userData.animer(dt, nuit);
+    tiki.userData.animer(dt, nuit);
+    ecume.userData.animer(tempsIle);
   };
   // Les lampes des décors restent dans la scène, même quand leur décor est
   // caché (éteintes) : le nombre de lumières ne change pas d'une carte à
@@ -430,6 +757,8 @@ export function creerIle(scene) {
   );
   const tampon = new THREE.Color();
 
+  const clarte = () => Math.min(Math.max((actuelle.hemi - AMBIANCES.nuit.hemi) / (AMBIANCES.jour.hemi - AMBIANCES.nuit.hemi), 0), 1);
+
   function appliquer() {
     ciel.material.color.copy(couleurs.ciel);
     scene.fog.color.copy(couleurs.brouillard);
@@ -457,6 +786,11 @@ export function creerIle(scene) {
     },
     // Décor de la carte d'indice donné (CARTES dans monde.js).
     carte: montrerCarte,
+    // De 0 (nuit noire) à 1 (plein jour), d'après la lumière du ciel : le
+    // halo de post.js s'y règle.
+    get jour() {
+      return clarte();
+    },
     // Jusqu'où l'on voit la nuit (mètres) : la lanterne améliorée repousse le noir.
     vision(loin) {
       nuit.loin = loin;
@@ -464,7 +798,10 @@ export function creerIle(scene) {
     },
     mettreAJour(t, dt = 0) {
       mer.userData.animer(t);
-      if (decors.chateau.visible) decors.chateau.userData.animer(dt);
+      // Lucioles, braises et brume ne vivent que la nuit.
+      const nuit = Math.min(1, actuelle.etoiles / AMBIANCES.nuit.etoiles);
+      for (const decor of Object.values(decors)) if (decor.visible) decor.userData.animer(dt, nuit);
+      cielNocturne.userData.animer(dt, 1 - clarte(), actuelle.lune);
       for (const b of bouees) {
         b.position.y = Math.sin(t * 1.3 + b.userData.phase) * 0.12;
         b.rotation.z = Math.sin(t * 0.9 + b.userData.phase) * 0.12;

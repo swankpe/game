@@ -150,7 +150,62 @@ function genererDecor() {
     touffes.push({ x, z, taille: 0.6 + alea() * 0.8, rotation: alea() * Math.PI * 2 });
   }
 
-  return { palmiers, rochers, touffes };
+  const libre = (x, z, marge) => !presDuPonton(x, z, marge) && !presDeLaCabane(x, z, marge) && loinDe(x, z, palmiers, marge) && loinDe(x, z, rochers, marge)
+    && Math.hypot(x - APPARITION.x, z - APPARITION.z) > 4;
+  // Une barque échouée sur la plage, à l'ouest ; cap : direction de sa quille.
+  let epave = null;
+  for (let essai = 0; !epave && essai < 300; essai++) {
+    const angle = 2.2 + alea() * 1.6;
+    const r = rayonIle(angle) * (0.88 + alea() * 0.06);
+    const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+    if (libre(x, z, 2.5)) epave = { x, z, cap: angle + Math.PI / 2 + (alea() - 0.5) * 0.6, gite: 0.3 + alea() * 0.15 };
+  }
+  // Bois flotté sur le sable (on l'enjambe).
+  const bois = [];
+  for (let essai = 0; bois.length < 7 && essai < 400; essai++) {
+    const angle = alea() * Math.PI * 2;
+    const r = rayonIle(angle) * (0.84 + alea() * 0.14);
+    const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+    if (!libre(x, z, 1.5) || (epave && Math.hypot(x - epave.x, z - epave.z) < 3.5)) continue;
+    bois.push({ x, z, longueur: 1.2 + alea() * 1.3, rayon: 0.08 + alea() * 0.07, cap: alea() * Math.PI });
+  }
+  // Torches de bambou : de part et d'autre du comptoir et du ponton, et deux
+  // sur l'île.
+  const torches = [
+    { x: CABANE.x + CABANE.profondeur / 2 + 0.9, z: CABANE.z - CABANE.largeur / 2 - 0.4 },
+    { x: CABANE.x + CABANE.profondeur / 2 + 0.9, z: CABANE.z + CABANE.largeur / 2 + 0.4 },
+    { x: PONTON.x0 - 0.4, z: PONTON.z - PONTON.largeur / 2 - 0.5 },
+    { x: PONTON.x0 - 0.4, z: PONTON.z + PONTON.largeur / 2 + 0.5 },
+  ];
+  for (const angle of [1.9, 4.4]) {
+    for (let t = 0.66; t < 0.8; t += 0.03) {
+      const r = rayonIle(angle) * t, x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+      if (libre(x, z, 1.2)) {
+        torches.push({ x, z });
+        break;
+      }
+    }
+  }
+  // Caisses près de la cabane, assez loin des murs pour qu'un zombie passe
+  // entre les deux (sinon il s'y coince).
+  const caisses = [{ x: CABANE.x - 0.6, z: CABANE.z + CABANE.largeur / 2 + 2.2 }, { x: CABANE.x - CABANE.profondeur / 2 - 2.3, z: CABANE.z - 1.2 }];
+  // Fougères et fleurs dans l'herbe, coquillages et étoiles de mer sur le sable.
+  const plantes = [];
+  for (let essai = 0; plantes.length < 70 && essai < 3000; essai++) {
+    const x = (alea() - 0.5) * RAYON_ILE * 1.4, z = (alea() - 0.5) * RAYON_ILE * 1.4;
+    if (!estHerbe(x, z) || presDeLaCabane(x, z, 0.6) || !loinDe(x, z, palmiers, 0.8)) continue;
+    plantes.push({ x, z, genre: alea() < 0.4 ? 'fougere' : 'fleur', taille: 0.6 + alea() * 0.7, teinte: alea(), rotation: alea() * Math.PI * 2 });
+  }
+  const coquillages = [];
+  for (let essai = 0; coquillages.length < 45 && essai < 1000; essai++) {
+    const angle = alea() * Math.PI * 2;
+    const r = rayonIle(angle) * (0.72 + alea() * 0.3);
+    const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+    if (presDuPonton(x, z, 0.3)) continue;
+    coquillages.push({ x, z, genre: alea() < 0.25 ? 'etoile' : 'coquille', teinte: alea(), rotation: alea() * Math.PI * 2, taille: 0.7 + alea() * 0.6 });
+  }
+
+  return { palmiers, rochers, touffes, epave, bois, torches, caisses, plantes, coquillages };
 }
 
 export const DECOR = genererDecor();
@@ -158,17 +213,30 @@ export const DECOR = genererDecor();
 const OBSTACLES = [
   ...DECOR.palmiers.map((p) => ({ x: p.x, z: p.z, rayon: 0.3 })),
   ...DECOR.rochers.filter((r) => r.taille > 0.55).map((r) => ({ x: r.x, z: r.z, rayon: r.taille * 0.85 })),
+  ...DECOR.torches.map((t) => ({ x: t.x, z: t.z, rayon: 0.15 })),
+  ...DECOR.caisses.map((c) => ({ x: c.x, z: c.z, rayon: 0.75 })),
+  // La barque : une gélule le long de sa quille (deux cercles qui se
+  // chevauchent se renverraient le joueur de l'un à l'autre).
+  ...(DECOR.epave ? [{ x: DECOR.epave.x, z: DECOR.epave.z, rayon: 0.8, demi: 0.9, cap: DECOR.epave.cap }] : []),
 ];
 
 // Repousse un point hors des obstacles (troncs, gros rochers, cabane).
 export function resoudreCollisions(x, z) {
   for (const o of OBSTACLES) {
-    const dx = x - o.x, dz = z - o.z;
+    // Point le plus proche de l'obstacle : son centre, ou sur son axe (gélule).
+    let cx = o.x, cz = o.z;
+    if (o.demi) {
+      const ux = Math.cos(o.cap), uz = Math.sin(o.cap);
+      const t = Math.max(-o.demi, Math.min(o.demi, (x - o.x) * ux + (z - o.z) * uz));
+      cx += ux * t;
+      cz += uz * t;
+    }
+    const dx = x - cx, dz = z - cz;
     const d = Math.hypot(dx, dz);
     const min = o.rayon + RAYON_JOUEUR;
     if (d < min && d > 1e-6) {
-      x = o.x + (dx / d) * min;
-      z = o.z + (dz / d) * min;
+      x = cx + (dx / d) * min;
+      z = cz + (dz / d) * min;
     }
   }
   const demiX = CABANE.profondeur / 2, demiZ = CABANE.largeur / 2;

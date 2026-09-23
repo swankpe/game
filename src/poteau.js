@@ -22,6 +22,8 @@ export function creerPoteau(scene) {
   const corde = new THREE.MeshStandardMaterial({ color: '#b08a55', flatShading: true, roughness: 1 });
   const metal = new THREE.MeshStandardMaterial({ color: '#2d2f36', flatShading: true, roughness: 0.6, metalness: 0.3 });
   const verre = new THREE.MeshBasicMaterial({ color: '#ffd98a' });
+  // Vitre allumée : assez vive pour rayonner.
+  const vitreAllumee = new THREE.Color('#ffd98a').multiplyScalar(8);
 
   const groupe = new THREE.Group();
   const mat = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 2.75, 6), bois);
@@ -98,7 +100,8 @@ export function creerPoteau(scene) {
       allumage = niveau;
       faisceau.intensity = FAISCEAU * niveau * puissance;
       lueur.intensity = LUEUR * niveau * puissance;
-      verre.color.set(niveau > 0 ? '#ffd98a' : '#8a7a5a');
+      if (niveau > 0) verre.color.copy(vitreAllumee);
+      else verre.color.set('#8a7a5a');
     },
     // Niveau de la lanterne achetée à l'armurerie : plus loin, plus large, plus fort.
     ameliorer(niveau) {

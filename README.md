@@ -11,9 +11,9 @@ lien.
   chaque manche.
 - **Manche de 5 minutes**. Les zombies arrivent de plus en plus vite pendant
   la manche (2,5 fois plus à la fin qu'au début), et chaque manche en amène
-  davantage, plus rapides et plus résistants. Survivre jusqu'au bout gagne la
-  manche ; si le protégé meurt, c'est la défaite et tout le monde retourne au
-  camp.
+  davantage, plus rapides et plus résistants. Au bout des 5 minutes, **le boss**
+  sort de la mer : l'abattre gagne la manche. Si le protégé meurt, c'est la
+  défaite et tout le monde retourne au camp.
 - **La nuit**, on ne voit bien que ce qu'éclaire la lanterne du protégé.
 - **Le protégé** ne bouge pas : il dirige la lanterne avec la souris.
   **F** lance l'**Illumination** : toute l'île éclairée pendant 30 secondes,
@@ -37,6 +37,23 @@ bouffis compris (réaction en chaîne), et leurs primes vont à celui qui l'a
 abattu. Abattu trop près du poteau, il blesse quand même le protégé : tire-le
 de loin. La part des coureurs, colosses et bouffis grandit de manche en
 manche ; un message prévient à la première apparition de chaque type.
+
+### Le boss : le Roi Noyé
+
+Quand le chrono tombe à zéro, un géant couronné sort des flots en traînant
+une ancre, sur une musique qui ne laisse pas souffler. Sa barre de vie
+s'affiche en haut de l'écran.
+
+- Il résiste d'autant plus qu'il y a de défenseurs et que la manche avance
+  (1 500 points de vie seul en manche 1, 2 700 à deux défenseurs, 3 900 à
+  trois), et vise la tête : dégâts doublés.
+- Il marche lentement vers le poteau ; au contact, son ancre tue le protégé
+  en quelques secondes. Porter le poteau pour le fuir est une option.
+- Toutes les 12 secondes, il hurle et fait surgir des coureurs autour de lui ;
+  la horde continue d'arriver, moins vite.
+- À mi-vie, il **enrage** : yeux rouges, il accélère, la musique aussi.
+- L'abattre rapporte **250 $** au tireur, en plus des 150 $ de la manche pour
+  tout le monde.
 
 ### Argent et armurerie
 

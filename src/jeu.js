@@ -8,15 +8,18 @@ import { genererApercus } from './apercus.js';
 import { creerArme } from './arme.js';
 import { BOUTIQUE, hauteurSol, hauteurTerrain } from './monde.js';
 import { creerMonstresVue } from './monstres.js';
+import { creerMusique } from './musique.js';
 import { HAUTEUR_LANTERNE, creerPoteau } from './poteau.js';
 import { creerProjectiles } from './projectiles.js';
 import {
-  ARMES, ARMES_DEPART, BONUS_MANCHE, DISPERSION_MOUVEMENT, DISPERSION_SAUT, DISTANCE_BOUTIQUE, DISTANCE_PORTER,
+  ARMES, ARMES_DEPART, BONUS_MANCHE, BOSS, DISPERSION_MOUVEMENT, DISPERSION_SAUT, DISTANCE_BOUTIQUE, DISTANCE_PORTER,
   EXPLOSION_BOUFFI, MULTIPLICATEUR_TETE, POTEAU_DEPART, PV_PROTEGE, TYPES_ZOMBIES, degatsExplosion, indiceArme,
   positionPortee,
 } from './regles.js';
 import { creerSimulation, normaliserMonde } from './simulation.js';
-import { sonCaisse, sonEclatement, sonExplosion, sonMort, sonRecharge, sonTir, sonTouche, sonVide } from './sons.js';
+import {
+  sonCaisse, sonEclatement, sonExplosion, sonMort, sonRecharge, sonRugissement, sonTir, sonTouche, sonVictoire, sonVide,
+} from './sons.js';
 import { creerVue } from './vue.js';
 
 const HAUTEUR_YEUX = 1.62;
@@ -58,7 +61,7 @@ function mondeVide() {
   return {
     phase: 'attente', manche: 0, reste: 0, pv: PV_PROTEGE, protege: null,
     poteau: { x: POTEAU_DEPART.x, z: POTEAU_DEPART.z, porteur: null },
-    illumination: 0, recharge: 0, tues: 0, monstres: [], comptes: {}, explosions: [],
+    illumination: 0, recharge: 0, tues: 0, monstres: [], comptes: {}, explosions: [], boss: null,
   };
 }
 
@@ -77,6 +80,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   const monstres = creerMonstresVue(scene);
   const poteau = creerPoteau(scene);
   const projectiles = creerProjectiles(scene);
+  const musique = creerMusique();
   const apercus = genererApercus(rendu, ARMES.map((a) => a.id));
 
   let monId = null;
@@ -119,6 +123,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   const typesVus = new Set();
   // Alertes en attente (nouveaux types), montrées l'une après l'autre.
   let alertes = [];
+  // Le boss tel qu'on l'a vu : pour annoncer son arrivée, ses cris, sa rage.
+  let bossVu = { id: null, cris: 0, enrage: false };
 
   const estHote = () => membres.length > 0 && membres[0].id === monId;
   const nomDe = (id) => membres.find((m) => m.id === id)?.nom ?? 'Quelqu’un';
@@ -343,6 +349,49 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       if (TYPES_ZOMBIES[k]?.alerte) alertes.push(TYPES_ZOMBIES[k].alerte);
     }
     if (alertes.length && horloge >= infoFin) informer(alertes.shift(), 3);
+  }
+
+  // --- Boss de fin de manche -------------------------------------------------
+
+  // Le boss vivant et ses caractéristiques, ou null.
+  function bossEnJeu() {
+    const info = monde.boss;
+    if (!info || monde.phase !== 'manche') return null;
+    const m = monde.monstres.find((x) => x.id === info.id);
+    return m ? { ...info, pv: Math.max(0, m.pv), x: m.x, z: m.z } : null;
+  }
+
+  // Arrivée, cris et rage du boss ; sa musique tant qu'il vit.
+  function suivreBoss() {
+    const b = bossEnJeu();
+    if (!b) {
+      musique.arreter();
+      monstres.enrager(false);
+      return;
+    }
+    const proximite = Math.max(0.35, 1 - Math.hypot(b.x - camera.position.x, b.z - camera.position.z) / 80);
+    if (bossVu.id !== b.id) {
+      bossVu = { id: b.id, cris: b.cris, enrage: false };
+      annoncer(BOSS.nom, 'Il sort des flots ! Abattez-le pour gagner la manche.', 4);
+      sonRugissement(proximite);
+      secousse = Math.max(secousse, 0.7);
+      if (sim) urgent = true;
+    }
+    if (b.cris > bossVu.cris) {
+      bossVu.cris = b.cris;
+      monstres.rugir(b.id);
+      sonRugissement(proximite * 0.8);
+      informer(`${BOSS.nom} appelle la horde !`, 2.5);
+    }
+    const enrage = b.pv <= b.pvMax * BOSS.enrage;
+    if (enrage && !bossVu.enrage) {
+      bossVu.enrage = true;
+      sonRugissement(proximite);
+      informer(`${BOSS.nom} enrage !`, 2.5);
+    }
+    monstres.enrager(enrage);
+    musique.enrager(enrage);
+    musique.jouer();
   }
 
   // --- Armurerie -----------------------------------------------------------
@@ -583,7 +632,13 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         annoncer(`Manche ${manche}`, detail);
       } else if (phase === 'pause') {
         const suivant = protege === monId ? 'toi' : protege ? nomDe(protege) : 'le mannequin';
-        annoncer(`Manche ${manche - 1} gagnée !`, `+${BONUS_MANCHE} $ pour chacun · prochain protégé : ${suivant}`, 5);
+        const detail = `+${BONUS_MANCHE} $ pour chacun · prochain protégé : ${suivant}`;
+        if (bossVu.id !== null) {
+          annoncer(`${BOSS.nom} est vaincu !`, `Manche ${manche - 1} gagnée · ${detail}`, 5);
+          sonVictoire();
+        } else {
+          annoncer(`Manche ${manche - 1} gagnée !`, detail, 5);
+        }
       } else if (phase === 'defaite') {
         annoncer('Le protégé est tombé…', `Défaite à la manche ${manche}. ${monde.tues} zombies éliminés.`, 7);
       } else if (phase === 'attente' && precedent.phase === 'defaite') {
@@ -600,6 +655,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       annoncer('Illumination !', "Toute l'île est éclairée pendant 30 secondes.", 2.5);
     }
     if (pv < precedent.pv && protege === monId) degats = 1;
+    if (phase !== 'manche') bossVu = { id: null, cris: 0, enrage: false };
     // Chaque manche repart chargeurs pleins ; une nouvelle partie oublie les
     // types déjà vus.
     if (phase === 'manche' && (precedent.phase !== 'manche' || manche !== precedent.manche)) {
@@ -647,7 +703,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     $('lancement').hidden = enPartie;
     $('modifier').hidden = enPartie;
     if (enPartie) {
-      const chrono = monde.phase === 'manche' ? minutes(monde.reste) : monde.phase === 'pause' ? `reprise dans ${Math.ceil(monde.reste)} s` : '';
+      const chrono = monde.phase === 'manche' ? (monde.boss ? 'Boss !' : minutes(monde.reste))
+        : monde.phase === 'pause' ? `reprise dans ${Math.ceil(monde.reste)} s` : '';
       $('manche').textContent = `Manche ${monde.phase === 'pause' ? monde.manche - 1 : monde.manche}`;
       $('chrono').textContent = chrono;
       $('tues').textContent = `${monde.tues} zombie${monde.tues > 1 ? 's' : ''} éliminé${monde.tues > 1 ? 's' : ''}`;
@@ -661,6 +718,20 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         : `${membres.length} joueurs au camp. Le protégé sera tiré au sort.`;
       $('role-solo').hidden = !seul;
       for (const b of document.querySelectorAll('[data-role]')) b.setAttribute('aria-pressed', String(b.dataset.role === roleSolo));
+    }
+
+    // Barre de vie du boss, en haut de l'écran. La trace claire suit la barre
+    // avec retard : on voit ce que la dernière rafale a enlevé.
+    const b = bossEnJeu();
+    $('boss').hidden = !b;
+    if (b) {
+      const part = `${Math.max(0, Math.min(1, b.pv / b.pvMax)) * 100}%`;
+      $('boss-barre').style.width = part;
+      $('boss-trace').style.width = part;
+      const enrage = b.pv <= b.pvMax * BOSS.enrage;
+      $('boss').dataset.enrage = String(enrage);
+      $('boss-nom').textContent = BOSS.nom;
+      $('boss-etat').textContent = enrage ? 'Enragé !' : `${Math.ceil(b.pv)} / ${b.pvMax}`;
     }
 
     const illum = $('illumination');
@@ -758,6 +829,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       membres = [];
       monstres.vider();
       projectiles.vider();
+      musique.arreter(0.3);
+      bossVu = { id: null, cris: 0, enrage: false };
       tirsEnAttente = [];
       tirsDifferes = [];
       armeEquipee = 'pistolet';
@@ -861,6 +934,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           rechargement: rechargement ? rechargement.id : null,
           progression: rechargement ? (horloge - rechargement.debut) / rechargement.duree : null,
           explosions: [...explosionsVues.keys()],
+          boss: bossEnJeu(),
+          musique: musique.active,
           joueur: [joueur.etat.x, joueur.etat.y, joueur.etat.z],
           vue: { ...vue.etat },
         }),
@@ -886,6 +961,18 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           sim.etat.monstres.push({ id, k, x, z, r: 0, pv, v: vitesse, a: false, c: 1 });
           urgent = true;
           return id;
+        },
+        // Hôte seulement : blesser un zombie comme si on l'avait touché.
+        blesser(id, degats) {
+          if (!sim) return false;
+          if (sim.toucher(id, degats, monId)) urgent = true;
+          return true;
+        },
+        // Hôte seulement : le chrono tombe à zéro, le boss arrive.
+        finirChrono() {
+          if (!sim || sim.etat.phase !== 'manche') return false;
+          sim.etat.reste = 0.05;
+          return true;
         },
         illuminer() {
           if (!sim) return false;
@@ -925,6 +1012,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       suivreChangements();
       jouerExplosions();
       signalerNouveauxTypes();
+      suivreBoss();
+      musique.mettreAJour();
 
       if (fps !== enJeu) enJeu ? this.entrer() : this.sortir();
       if (fps) commandesLocales(dt);

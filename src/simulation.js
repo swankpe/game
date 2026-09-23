@@ -1,14 +1,14 @@
-// La partie telle que la fait tourner l'hôte : manches, zombies, vie du
-// protégé, poteau, Illumination. Aucun Three.js ni réseau : l'hôte appelle
-// pas() à chaque image et diffuse instantane() ; si l'hôte s'en va, le
-// suivant reprend avec charger(dernier instantané reçu).
+// La partie telle que la fait tourner l'hôte : manches, zombies, boss de fin
+// de manche, vie du protégé, poteau, Illumination. Aucun Three.js ni réseau :
+// l'hôte appelle pas() à chaque image et diffuse instantane() ; si l'hôte
+// s'en va, le suivant reprend avec charger(dernier instantané reçu).
 
 import { BOUTIQUE, estPraticable, rayonIle, resoudreCollisions } from './monde.js';
 import {
-  ARMES, ARMES_DEPART, BONUS_MANCHE, DEGATS_MONSTRE, DISTANCE_BOUTIQUE, DISTANCE_PORTER, DUREE_DEFAITE,
+  ARMES, ARMES_DEPART, BONUS_MANCHE, BOSS, DEGATS_MONSTRE, DISTANCE_BOUTIQUE, DISTANCE_PORTER, DUREE_DEFAITE,
   DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE, EXPLOSION_BOUFFI, MONSTRES_MAX, PORTEE_ATTAQUE, POTEAU_DEPART,
   PV_PROTEGE, RAYON_MONSTRE, RECHARGE_ILLUMINATION, TYPES_ZOMBIES, degatsExplosion, indiceArme, monstresParMinute,
-  poidsTypes, positionPortee, pvMonstre, tirerProtege, tirerType, vitesseMonstre,
+  poidsTypes, positionPortee, pvBoss, pvMonstre, renfortsBoss, tirerProtege, tirerType, vitesseMonstre,
 } from './regles.js';
 
 export const PHASES = ['attente', 'manche', 'pause', 'defaite'];
@@ -38,6 +38,8 @@ function etatInitial() {
     // Explosions de bouffis récentes : { id, x, z, age }.
     explosions: [],
     prochaineExplosion: 1,
+    // Boss de fin de manche : { id, pvMax, cris, invocation, enrage }, ou null.
+    boss: null,
     // Argent et armes de chaque joueur : { id: { argent, armes } }.
     comptes: {},
   };
@@ -53,33 +55,83 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
 
   const compte = (id) => (s.comptes[id] ??= { argent: 0, armes: ARMES_DEPART });
 
-  function apparaitre() {
-    // Sortie de l'eau, du côté opposé au poteau de préférence.
+  // Point de sortie de l'eau, du côté opposé au poteau de préférence : le
+  // plus loin parmi quelques essais, ou le premier assez loin. large : plus
+  // loin du rivage (le boss sort des eaux profondes).
+  function pointDeSortie({ large = 1.16, essais = 6, assezLoin = 18 } = {}) {
     let meilleur = null;
-    for (let essai = 0; essai < 6; essai++) {
+    for (let essai = 0; essai < essais; essai++) {
       const angle = aleatoire() * Math.PI * 2;
-      const r = rayonIle(angle) * 1.16;
+      const r = rayonIle(angle) * large;
       const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
       const d = Math.hypot(x - s.poteau.x, z - s.poteau.z);
       if (!meilleur || d > meilleur.d) meilleur = { x, z, d };
-      if (d > 18) break;
+      if (d > assezLoin) break;
     }
-    let k = tirerType(poidsTypes(s.manche, DUREE_MANCHE - s.reste), aleatoire());
-    const { max } = TYPES_ZOMBIES[k];
-    if (max && s.monstres.filter((m) => m.k === k).length >= max) k = 0;
+    return meilleur;
+  }
+
+  function ajouterMonstre(k, x, z, pv = null) {
     const type = TYPES_ZOMBIES[k];
-    s.monstres.push({
+    const m = {
       id: s.prochainId++,
       k,
-      x: meilleur.x,
-      z: meilleur.z,
+      x,
+      z,
       r: 0,
-      pv: Math.round(pvMonstre(s.manche) * type.pv),
+      pv: pv ?? Math.round(pvMonstre(s.manche) * type.pv),
       v: type.vitesse * (0.85 + aleatoire() * 0.3),
       a: false,
       // Côté par lequel il contourne un obstacle.
       c: aleatoire() < 0.5 ? -1 : 1,
-    });
+    };
+    s.monstres.push(m);
+    return m;
+  }
+
+  function apparaitre() {
+    const { x, z } = pointDeSortie();
+    let k = tirerType(poidsTypes(s.manche, DUREE_MANCHE - s.reste), aleatoire());
+    const { max } = TYPES_ZOMBIES[k];
+    if (max && s.monstres.filter((m) => m.k === k).length >= max) k = 0;
+    ajouterMonstre(k, x, z);
+  }
+
+  const K_BOSS = TYPES_ZOMBIES.findIndex((t) => t.boss);
+  const K_COUREUR = TYPES_ZOMBIES.findIndex((t) => t.id === 'coureur');
+
+  function appelerBoss() {
+    const { x, z } = pointDeSortie({ large: 1.3, essais: 12, assezLoin: Infinity });
+    const defenseurs = membres.filter((m) => m.id !== s.protege).length;
+    const pvMax = pvBoss(s.manche, defenseurs);
+    const m = ajouterMonstre(K_BOSS, x, z, pvMax);
+    m.v = TYPES_ZOMBIES[K_BOSS].vitesse;
+    s.boss = { id: m.id, pvMax, cris: 0, invocation: BOSS.premiereInvocation, enrage: false };
+  }
+
+  const bossEnJeu = () => (s.boss ? s.monstres.find((m) => m.id === s.boss.id) ?? null : null);
+
+  // Le boss hurle : des coureurs surgissent autour de lui.
+  function invoquer(boss) {
+    s.boss.cris += 1;
+    const n = renfortsBoss(s.manche);
+    for (let i = 0; i < n && s.monstres.length < MONSTRES_MAX; i++) {
+      const a = (i / n) * Math.PI * 2 + aleatoire();
+      const p = resoudreCollisions(boss.x + Math.cos(a) * 2.6, boss.z + Math.sin(a) * 2.6);
+      ajouterMonstre(K_COUREUR, p.x, p.z);
+    }
+  }
+
+  function gagnerManche() {
+    s.phase = 'pause';
+    s.reste = DUREE_PAUSE;
+    s.monstres = [];
+    s.boss = null;
+    s.manche += 1;
+    for (const m of membres) compte(m.id).argent += BONUS_MANCHE;
+    s.protege = tirerProtege(membres, { aleatoire, roleSolo, precedent: s.precedent });
+    s.precedent = s.protege;
+    if (s.poteau.porteur === s.protege) s.poteau.porteur = null;
   }
 
   const typeDe = (m) => TYPES_ZOMBIES[m.k ?? 0] ?? TYPES_ZOMBIES[0];
@@ -97,6 +149,11 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
 
   function blesser(m, degats, auteur) {
     m.pv -= degats;
+    // Le boss à moitié mort enrage : il accélère.
+    if (s.boss?.id === m.id && !s.boss.enrage && m.pv > 0 && m.pv <= s.boss.pvMax * BOSS.enrage) {
+      s.boss.enrage = true;
+      m.v *= BOSS.vitesseEnrage;
+    }
     if (m.pv > 0) return false;
     abattre(m, auteur);
     return true;
@@ -125,6 +182,7 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
     s.reste = DUREE_MANCHE;
     s.pv = PV_PROTEGE;
     s.monstres = [];
+    s.boss = null;
     // Un premier zombie arrive vite, pour que la manche démarre vraiment.
     s.cumul = 0.7;
   }
@@ -242,12 +300,22 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
       s.explosions = s.explosions.filter((e) => e.age < DUREE_EXPLOSION);
 
       if (s.phase === 'manche') {
-        s.reste -= dt;
+        s.reste = Math.max(0, s.reste - dt);
         const ecoule = DUREE_MANCHE - s.reste;
-        s.cumul += (monstresParMinute(s.manche, ecoule) / 60) * dt;
+        // Pendant le combat contre le boss, la horde ralentit sans s'arrêter.
+        const cadence = s.boss ? monstresParMinute(s.manche, 0) * BOSS.apparitions : monstresParMinute(s.manche, ecoule);
+        s.cumul += (cadence / 60) * dt;
         while (s.cumul >= 1) {
           s.cumul -= 1;
           if (s.monstres.length < MONSTRES_MAX) apparaitre();
+        }
+        const boss = bossEnJeu();
+        if (boss) {
+          s.boss.invocation -= dt;
+          if (s.boss.invocation <= 0) {
+            s.boss.invocation = BOSS.invocation;
+            invoquer(boss);
+          }
         }
         avancerMonstres(dt);
         if (s.pv <= 0) {
@@ -256,14 +324,9 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
           s.reste = DUREE_DEFAITE;
           s.poteau.porteur = null;
         } else if (s.reste <= 0) {
-          s.phase = 'pause';
-          s.reste = DUREE_PAUSE;
-          s.monstres = [];
-          s.manche += 1;
-          for (const m of membres) compte(m.id).argent += BONUS_MANCHE;
-          s.protege = tirerProtege(membres, { aleatoire, roleSolo, precedent: s.precedent });
-          s.precedent = s.protege;
-          if (s.poteau.porteur === s.protege) s.poteau.porteur = null;
+          // Fin du chrono : le boss sort de la mer ; sa mort gagne la manche.
+          if (!s.boss) appelerBoss();
+          else if (!bossEnJeu()) gagnerManche();
         }
       } else if (s.phase === 'pause') {
         s.reste -= dt;
@@ -337,6 +400,7 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
         jo: Object.fromEntries(Object.entries(s.comptes).map(([id, c]) => [id, [c.argent, c.armes]])),
         m: s.monstres.map((m) => [m.id, arrondi(m.x), arrondi(m.z), arrondi(m.r), m.a ? 1 : 0, arrondi(m.pv, 1), arrondi(m.v), m.k ?? 0]),
         ex: s.explosions.map((e) => [e.id, arrondi(e.x), arrondi(e.z)]),
+        bo: s.boss ? [s.boss.id, s.boss.pvMax, s.boss.cris] : null,
       };
     },
 
@@ -362,6 +426,10 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
         explosions: i.explosions.map((e) => ({ ...e, age: 0 })),
         prochaineExplosion: i.explosions.reduce((max, e) => Math.max(max, e.id), 0) + 1,
       };
+      if (i.boss) {
+        const boss = s.monstres.find((m) => m.id === i.boss.id);
+        s.boss = { ...i.boss, invocation: BOSS.invocation, enrage: !!boss && boss.pv <= i.boss.pvMax * BOSS.enrage };
+      }
       return true;
     },
   };
@@ -390,6 +458,10 @@ export function normaliserMonde(inst) {
     .slice(0, EXPLOSIONS_MAX)
     .filter((e) => Array.isArray(e) && Number.isInteger(e[0]) && [e[1], e[2]].every(Number.isFinite))
     .map(([id, x, z]) => ({ id, x, z }));
+  const bo = inst.bo;
+  const boss = Array.isArray(bo) && Number.isInteger(bo[0]) && Number.isFinite(bo[1]) && bo[1] > 0 && Number.isInteger(bo[2]) && bo[2] >= 0
+    ? { id: bo[0], pvMax: bo[1], cris: bo[2] }
+    : null;
   return {
     phase: inst.ph,
     manche: Number.isInteger(inst.ma) ? inst.ma : 0,
@@ -403,6 +475,7 @@ export function normaliserMonde(inst) {
     comptes: normaliserComptes(inst.jo),
     monstres,
     explosions,
+    boss,
   };
 }
 

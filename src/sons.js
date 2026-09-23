@@ -18,6 +18,10 @@ function audio() {
   return contexte;
 }
 
+// Pour la musique (musique.js) : même contexte, même bruit blanc.
+export const contexteAudio = audio;
+export const bruitBlanc = () => bruit;
+
 function enveloppe(ctx, volume, duree) {
   const g = ctx.createGain();
   g.gain.setValueAtTime(volume, ctx.currentTime);
@@ -181,4 +185,70 @@ export function sonEclatement(volume = 1) {
   bulle.connect(enveloppe(ctx, 0.8 * volume, 0.45));
   bulle.start();
   bulle.stop(ctx.currentTime + 0.5);
+}
+
+// Rugissement du boss : un grondement qui monte puis retombe, voilé de souffle.
+export function sonRugissement(volume = 1) {
+  const ctx = audio();
+  if (!ctx || volume <= 0.01) return;
+  const t = ctx.currentTime;
+  const voix = ctx.createOscillator();
+  voix.type = 'sawtooth';
+  voix.frequency.setValueAtTime(55, t);
+  voix.frequency.linearRampToValueAtTime(95, t + 0.4);
+  voix.frequency.exponentialRampToValueAtTime(40, t + 1.5);
+  // Tremblement de gorge.
+  const gorge = ctx.createOscillator();
+  gorge.frequency.value = 23;
+  const ampleur = ctx.createGain();
+  ampleur.gain.value = 14;
+  gorge.connect(ampleur).connect(voix.frequency);
+  const filtre = ctx.createBiquadFilter();
+  filtre.type = 'lowpass';
+  filtre.frequency.setValueAtTime(500, t);
+  filtre.frequency.linearRampToValueAtTime(1100, t + 0.4);
+  filtre.frequency.exponentialRampToValueAtTime(200, t + 1.5);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.7 * volume, t + 0.15);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+  g.connect(ctx.destination);
+  voix.connect(filtre).connect(g);
+  const souffle = ctx.createBufferSource();
+  souffle.buffer = bruit;
+  souffle.loop = true;
+  const filtreSouffle = ctx.createBiquadFilter();
+  filtreSouffle.type = 'bandpass';
+  filtreSouffle.frequency.value = 700;
+  souffle.connect(filtreSouffle).connect(g);
+  for (const n of [voix, gorge, souffle]) {
+    n.start(t);
+    n.stop(t + 1.7);
+  }
+}
+
+// Fanfare de victoire : un arpège qui monte et un accord tenu.
+export function sonVictoire() {
+  const ctx = audio();
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  const notes = [64, 68, 71, 76, 80, 83];
+  const frequence = (n) => 440 * 2 ** ((n - 69) / 12);
+  notes.forEach((n, i) => {
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = frequence(n);
+    const g = ctx.createGain();
+    const debut = t + i * 0.09;
+    const tenu = i >= notes.length - 3 ? 1.4 : 0.14;
+    g.gain.setValueAtTime(0.0001, debut);
+    g.gain.exponentialRampToValueAtTime(0.07, debut + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, debut + tenu);
+    const filtre = ctx.createBiquadFilter();
+    filtre.type = 'lowpass';
+    filtre.frequency.value = 3200;
+    o.connect(filtre).connect(g).connect(ctx.destination);
+    o.start(debut);
+    o.stop(debut + tenu + 0.05);
+  });
 }

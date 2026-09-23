@@ -94,6 +94,12 @@ export const TYPES_ZOMBIES = [
     id: 'bouffi', nom: 'Bouffi', pv: 1.5, vitesse: 0.85, degats: 0, largeur: 1.4, hauteur: 0.95, recompense: 25, explosif: true,
     alerte: 'Un bouffi ! Il explose : abattez-le loin du poteau.',
   },
+  // Le boss de fin de manche (voir BOSS) : jamais tiré au sort, ses points de
+  // vie viennent de pvBoss.
+  {
+    id: 'boss', nom: 'Le Roi Noyé', pv: 1, vitesse: 0.42, degats: 4, largeur: 3, hauteur: 3, recompense: 250, boss: true,
+    alerte: '',
+  },
 ];
 export const indiceType = (id) => TYPES_ZOMBIES.findIndex((t) => t.id === id);
 
@@ -103,7 +109,7 @@ export const indiceType = (id) => TYPES_ZOMBIES.findIndex((t) => t.id === id);
 export const EXPLOSION_BOUFFI = { rayon: 3.5, degats: 80, protege: 25 };
 
 // Part de chaque type parmi les apparitions (poids relatifs, dans l'ordre de
-// TYPES_ZOMBIES). Les colosses attendent la deuxième minute de la première
+// TYPES_ZOMBIES ; le boss, sans poids, n'est jamais tiré). Les colosses attendent la deuxième minute de la première
 // manche ; les types spéciaux gagnent du terrain de manche en manche.
 export function poidsTypes(manche, ecoule) {
   const avance = ecoule / DUREE_MANCHE;
@@ -115,6 +121,29 @@ export function poidsTypes(manche, ecoule) {
     0.06 + 0.03 * m + 0.03 * avance,
   ];
 }
+
+// Le boss de fin de manche. Quand le chrono tombe à zéro, il sort de la mer :
+// la manche n'est gagnée qu'à sa mort. Pendant le combat, les zombies
+// continuent d'arriver (apparitions : part de la cadence de début de manche)
+// et il appelle des coureurs en renfort toutes les invocation secondes. Sous
+// la moitié de sa vie (enrage), il accélère.
+export const BOSS = {
+  nom: 'Le Roi Noyé',
+  pv: 1500, parManche: 0.6, parDefenseur: 0.8,
+  apparitions: 0.5,
+  invocation: 12, premiereInvocation: 8, renforts: 3,
+  enrage: 0.5, vitesseEnrage: 1.5,
+};
+
+// Ses points de vie montent de manche en manche et avec le nombre de
+// défenseurs (au moins un : le joueur seul face au mannequin).
+export function pvBoss(manche, defenseurs) {
+  const d = Math.max(1, defenseurs);
+  return Math.round(BOSS.pv * (1 + BOSS.parManche * (manche - 1)) * (1 + BOSS.parDefenseur * (d - 1)));
+}
+
+// Renforts appelés à chaque cri : un de plus toutes les deux manches.
+export const renfortsBoss = (manche) => BOSS.renforts + Math.floor((manche - 1) / 2);
 
 // Tirage d'un type selon les poids (tirage : nombre entre 0 et 1).
 export function tirerType(poids, tirage) {

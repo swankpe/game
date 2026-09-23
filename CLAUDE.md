@@ -33,7 +33,7 @@ valide.
 | Message (broadcast `jeu`) | Émetteur | Contenu |
 | --- | --- | --- |
 | `etat` | chaque joueur | position, orientation du corps `r`, regard `vp`, arme en main `ar` |
-| `monde` | l'hôte | l'instantané complet : zombies et leur type `k`, explosions de bouffis `ex`, argent et armes (voir `normaliserMonde`) |
+| `monde` | l'hôte | l'instantané complet : zombies et leur type `k`, explosions de bouffis `ex`, boss `bo` (id, points de vie max, nombre de cris), argent et armes (voir `normaliserMonde`) |
 | `tirs` | le tireur | paquet de balles (100 ms) : trajectoires, et `m`, `dg` si un zombie est touché |
 | `grenade` | le tireur | départ et vitesse : chaque navigateur simule la même trajectoire |
 | `explosion` | le tireur | zombies touchés par sa grenade et dégâts |
@@ -49,6 +49,13 @@ Les bouffis explosent **chez l'hôte** (au contact du poteau, ou abattus) : la
 simulation compte les dégâts, réaction en chaîne comprise, et range
 l'explosion dans `ex` pendant 1,5 s avec un numéro. Chaque navigateur la
 montre une fois (`explosionsVues` dans `jeu.js`).
+
+Le boss est un zombie comme les autres (type `boss`, jamais tiré au sort),
+avec en plus `s.boss` dans la simulation. Chrono à zéro : l'hôte le fait
+apparaître ; la manche n'est gagnée que lorsqu'il a disparu de la liste. Ses
+cris (renforts) sont un compteur dans `bo` : chaque navigateur rugit quand il
+augmente ; la rage se déduit de ses points de vie. Barre de vie, musique et
+annonces se déduisent donc de l'instantané, sans message à part.
 
 Chargeurs, rechargement et recul ne concernent que le tireur : rien ne passe
 par le réseau ni par l'hôte.
@@ -83,6 +90,7 @@ message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
 | `src/avatars.js` | les autres joueurs : modèles, étiquettes, lissage |
 | `src/camera.js` | caméra en orbite de l'écran de création |
 | `src/sons.js` | bruitages Web Audio |
+| `src/musique.js` | musique du boss, programmée note à note sur l'horloge audio |
 
 ## Tests
 
@@ -92,7 +100,7 @@ npm test
 
 `node:test` couvre la simulation (manches, défaite, tirage, poteau,
 Illumination, argent, achats, types de zombies, explosions de bouffis en
-chaîne, contournement des obstacles, reprise par un nouvel hôte), les règles,
+chaîne, boss (apparition, renforts, rage, victoire, reprise), contournement des obstacles, reprise par un nouvel hôte), les règles,
 le salon et un salon
 complet sur `BroadcastChannel` (qui existe dans Node). Aucun test n'appelle
 Supabase.
@@ -102,8 +110,9 @@ Le jeu lui-même ne se vérifie qu'avec Playwright, dans Chromium lancé avec
 `?debug` expose `window.leProtege` : `etat()` (munitions et `progression` du
 rechargement comprises), `viser(x, y, z)`, `teleporter(x, z)`, `acheter(id)`,
 `equiper(id)`, `recharger()`, `boutique()`, et pour l'hôte `crediter(n, id)`,
-`illuminer()` et `poserZombie(type, x, z, vitesse, pv)` (immobile par défaut :
-pratique pour photographier un modèle). Pièges :
+`illuminer()`, `finirChrono()` (le boss arrive), `blesser(id, degats)` et
+`poserZombie(type, x, z, vitesse, pv)` (immobile par défaut : pratique pour
+photographier un modèle). Pièges :
 - `#hud` mesure 0×0 (enfants en `position: fixed`) : attendre `#hud .salon`.
 - Cliquer sur une zone libre de la scène : dans une petite fenêtre, le centre
   tombe sur la carte du salon et la souris n'est jamais verrouillée.
@@ -114,7 +123,9 @@ pratique pour photographier un modèle). Pièges :
 - Les zombies sortent de l'eau : sous la surface, le fond marin arrête les
   balles. Viser ceux dont `y > 0`.
 - Les pages d'un même contexte partagent `localStorage` et `BroadcastChannel` :
-  c'est ce qui permet de tester à plusieurs.
+  c'est ce qui permet de tester à plusieurs. Une page en arrière-plan reçoit
+  les messages mais ne dessine plus (ni interface ni musique) :
+  `bringToFront()` avant de la vérifier.
 
 ## Pièges rencontrés
 
@@ -137,6 +148,11 @@ pratique pour photographier un modèle). Pièges :
   `RoomEnvironment` ; en jeu, le métal garde une faible `metalness` et une
   lumière d'appoint accrochée à la caméra éclaire l'arme en main la nuit.
 - La barre d'armes est à gauche : à droite, elle recouvrait l'arme en main.
+- Une lumière placée à l'intérieur d'un maillage n'éclaire que ce qui
+  l'entoure : le halo du boss est devant son torse, sinon il restait noir.
+- Musique : les notes sont programmées 0,2 s en avance à chaque image. Après
+  un onglet en arrière-plan, on repart du présent (sinon tout le retard sort
+  d'un coup).
 - Recul : `vue.etat.lacet`/`tangage` sont le regard voulu par la souris (il
   oriente le corps et les pas) ; `vue.lacet`/`vue.tangage` y ajoutent le recul
   (caméra et tirs). Ne pas écrire le recul dans `vue.etat`, il ne reviendrait

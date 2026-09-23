@@ -3,8 +3,10 @@
 // en afficher des dizaines sans ralentir. Les positions viennent de l'hôte ;
 // ici on ne fait que lisser, animer et tester les tirs.
 //
-// Quatre silhouettes, une par type (TYPES_ZOMBIES) : on doit reconnaître un
-// coureur ou un bouffi de loin, dans la pénombre, à sa seule allure.
+// Une silhouette par type (TYPES_ZOMBIES) : on doit reconnaître un coureur ou
+// un bouffi de loin, dans la pénombre, à sa seule allure. Le boss a en plus
+// sa propre lumière, créée d'avance et éteinte tant qu'il n'est pas là : le
+// nombre de lumières ne change jamais (voir arme.js).
 
 import * as THREE from 'three';
 import { colorer, fusionnerGeometries, place } from './geometrie.js';
@@ -22,6 +24,8 @@ const bosse = (r, pos, couleur, variation = 0.1) => colorer(place(new THREE.Icos
 const tete = (pos, couleur, variation = 0.1) =>
   colorer(place(new THREE.LatheGeometry(PROFIL_TETE.map(([r, y]) => new THREE.Vector2(r, y)), 7), pos), couleur, variation);
 const oeil = (r, pos) => place(new THREE.IcosahedronGeometry(r, 0), pos);
+// Pièce lumineuse quelconque (même matière que les yeux).
+const lueur = (geo, pos) => place(geo.index ? geo.toNonIndexed() : geo, pos);
 
 // Penche tout le haut du corps vers l'avant autour des hanches (pivot en y),
 // en reculant le bassin de recul : la tête reste au-dessus des pieds, là où
@@ -41,6 +45,8 @@ function finir(parties) {
     yeux: fusionnerGeometries(parties.yeux),
     jambe: fusionnerGeometries(parties.jambe),
     bras: fusionnerGeometries(parties.bras),
+    // Bras droit différent (le boss y tient son ancre) ; sinon, le même.
+    brasD: parties.brasD ? fusionnerGeometries(parties.brasD) : null,
   };
 }
 
@@ -183,16 +189,93 @@ function construireBouffi() {
   });
 }
 
+// Le Roi Noyé : un géant sorti de la mer, couronne rouillée, algues et
+// coquillages, qui traîne une ancre. Dessiné à taille de rôdeur, agrandi par
+// sa hauteur (×3).
+function construireBoss() {
+  const peau = '#648a84', pale = '#8fb0a4', haillon = '#3a4150', algue = '#3a7038';
+  const rouille = '#7a4a2e', or = '#b08a3a', coquille = '#d9d0b4', fer = '#3a3d44';
+  const couronne = Array.from({ length: 7 }, (_, i) => {
+    const a = (i / 7) * Math.PI * 2;
+    return colorer(place(new THREE.ConeGeometry(0.035, 0.15, 4), { x: Math.sin(a) * 0.17, y: 2.1, z: 0.04 + Math.cos(a) * 0.17 }), or, 0.1);
+  });
+  const haut = [
+    cylindre(0.3, 0.27, 0.3, 8, { y: 0.98 }, haillon, 0.1),
+    cylindre(0.4, 0.3, 0.62, 9, { y: 1.32 }, peau, 0.14),
+    // Ventre plus pâle, gonflé d'eau.
+    colorer(place(new THREE.IcosahedronGeometry(0.28, 0), { y: 1.2, z: 0.14, sx: 1.1, sy: 0.9, sz: 0.7 }), pale, 0.1),
+    bosse(0.22, { x: 0.32, y: 1.62 }, peau),
+    bosse(0.22, { x: -0.32, y: 1.62 }, peau),
+    bosse(0.24, { y: 1.64, z: -0.15 }, peau),
+    tete({ y: 1.55, z: 0.07, sx: 1.05, sy: 0.82, sz: 1 }, peau),
+    // Mâchoire et crocs.
+    boite(0.24, 0.1, 0.12, { y: 1.66, z: 0.24 }, '#140c0c'),
+    ...[-0.075, -0.025, 0.025, 0.075].map((x, i) => boite(0.022, 0.05 + (i % 2) * 0.02, 0.02, { x, y: 1.71, z: 0.3 }, coquille)),
+    // Couronne rouillée : un bandeau et sept pointes.
+    cylindre(0.17, 0.19, 0.08, 8, { y: 2.0, z: 0.04 }, or, 0.15),
+    ...couronne,
+    // Chaîne en travers du torse.
+    ...Array.from({ length: 7 }, (_, i) => boite(0.07, 0.035, 0.03, { x: -0.27 + i * 0.09, y: 1.1 + i * 0.07, z: 0.34 - Math.abs(i - 3) * 0.02, rz: 0.65 }, fer)),
+    // Bernacles.
+    ...[[0.36, 1.72, 0.08], [-0.3, 1.75, 0.1], [0.2, 1.45, 0.3], [-0.25, 1.3, 0.3], [0.05, 1.8, -0.2], [-0.38, 1.55, -0.05]]
+      .map(([x, y, z], i) => colorer(place(new THREE.ConeGeometry(0.04 + (i % 2) * 0.015, 0.06, 5), { x, y, z, rx: -0.6 + x, rz: -x * 2 }), coquille)),
+    // Algues pendantes.
+    ...[[0.34, 1.52, 0.1, 0.3], [-0.36, 1.5, 0.05, 0.36], [0.12, 1.86, 0.18, 0.22], [-0.1, 1.84, 0.2, 0.26], [0.26, 1.0, 0.24, 0.34]]
+      .map(([x, y, z, l], i) => boite(0.035, l, 0.015, { x, y: y - l / 2, z, rz: i % 2 ? 0.1 : -0.1 }, algue, 0.2)),
+  ];
+  const yeux = [
+    ...[-1, 1].map((c) => oeil(0.038, { x: c * 0.085, y: 1.85, z: 0.25 })),
+    // Plaie lumineuse au torse et joyaux de la couronne.
+    lueur(new THREE.BoxGeometry(0.03, 0.2, 0.02), { x: 0.02, y: 1.38, z: 0.4, rz: 0.3 }),
+    lueur(new THREE.BoxGeometry(0.03, 0.13, 0.02), { x: 0.05, y: 1.27, z: 0.39, rz: -0.5 }),
+    ...[-1, 0, 1].map((c) => oeil(0.024, { x: c * 0.09, y: 2.0, z: 0.23 })),
+  ];
+  incliner([...haut, ...yeux], 0.1, 0.95, -0.03);
+  const bras = () => [
+    cylindre(0.12, 0.1, 0.62, 7, { y: -0.31 }, peau),
+    bosse(0.14, { y: -0.7 }, peau, 0.05),
+    colorer(place(new THREE.ConeGeometry(0.045, 0.06, 5), { x: 0.09, y: -0.22, z: 0.06, rz: -1.2 }), coquille),
+    boite(0.03, 0.28, 0.012, { x: -0.1, y: -0.35, z: 0.07 }, algue, 0.2),
+  ];
+  // L'ancre, tenue au poing : verge, jas, bras recourbés et pattes.
+  const bras2 = new THREE.TorusGeometry(0.28, 0.035, 4, 10, Math.PI);
+  const ancre = [
+    boite(0.06, 1.0, 0.06, { y: -1.15 }, rouille, 0.15),
+    boite(0.52, 0.05, 0.06, { y: -0.82 }, rouille, 0.1),
+    colorer(place(bras2, { y: -1.37, rz: Math.PI }), rouille, 0.15),
+    ...[-1, 1].map((c) => colorer(place(new THREE.ConeGeometry(0.07, 0.16, 4), { x: c * 0.29, y: -1.33, rz: -c * 0.5 }), rouille, 0.1)),
+  ];
+  return finir({
+    tronc: haut,
+    yeux,
+    jambe: [
+      cylindre(0.16, 0.14, 0.72, 7, { y: -0.36 }, haillon),
+      boite(0.26, 0.15, 0.34, { y: -0.78, z: 0.05 }, peau, 0.1),
+      boite(0.04, 0.3, 0.015, { x: 0.1, y: -0.3, z: 0.14 }, algue, 0.2),
+    ],
+    bras: bras(),
+    brasD: [...bras(), ...ancre],
+    hanches: [0.18, 0.86, -0.03],
+    epaules: [0.5, 1.58, 0.02],
+  });
+}
+
 // Allure de chaque type : amplitude des pas, cadence, penchant et roulis.
 const ALLURES = {
   rodeur: { foulee: 0.35, cadence: 2.2, penche: 0.12, roulis: 0.06, frappe: 9 },
   coureur: { foulee: 0.85, cadence: 2.4, penche: 0.06, roulis: 0.05, frappe: 12 },
   colosse: { foulee: 0.32, cadence: 1.1, penche: 0.06, roulis: 0.1, frappe: 4.5 },
   bouffi: { foulee: 0.3, cadence: 2.6, penche: -0.05, roulis: 0.17, frappe: 9 },
+  boss: { foulee: 0.3, cadence: 1, penche: 0.08, roulis: 0.08, frappe: 3.2 },
 };
+// Le boss sort de l'eau en quelques secondes, et met plus longtemps à tomber.
+const DUREE_LEVEE = 2.5;
+const PROFONDEUR_LEVEE = 6;
+const DUREE_CHUTE_BOSS = 1.6;
 
 // Couleur des yeux (et des pustules) : rouge, jaune, rouge sang, vert acide.
-const LUEURS = { rodeur: '#ff4a2e', coureur: '#ffd23a', colosse: '#ff1f10', bouffi: '#9dff4a' };
+const LUEURS = { rodeur: '#ff4a2e', coureur: '#ffd23a', colosse: '#ff1f10', bouffi: '#9dff4a', boss: '#62e6ff' };
+const LUEUR_RAGE = '#ff3a2a';
 
 export function creerMonstresVue(scene) {
   const modeles = {
@@ -207,6 +290,7 @@ export function creerMonstresVue(scene) {
     ].map(construireCoureur),
     colosse: [construireColosse()],
     bouffi: [construireBouffi()],
+    boss: [construireBoss()],
   };
   const matiere = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
   // Des yeux qui brillent faiblement : on devine les zombies avant de les voir.
@@ -214,6 +298,10 @@ export function creerMonstresVue(scene) {
   const pulsation = [new THREE.Color('#6fdc2c'), new THREE.Color('#d6ff7a')];
   const vues = new Map();
   let temps = 0;
+  // Lumière du boss : toujours dans la scène, allumée seulement pendant le combat.
+  const halo = new THREE.PointLight(LUEURS.boss, 0, 22, 1.4);
+  scene.add(halo);
+  let enrage = false;
 
   function creer(id, k) {
     const type = TYPES_ZOMBIES[k] ?? TYPES_ZOMBIES[0];
@@ -247,10 +335,13 @@ export function creerMonstresVue(scene) {
       jambeG: membre(g.jambe, [hx, hy, hz]),
       jambeD: membre(g.jambe, [-hx, hy, hz]),
       brasG: membre(g.bras, [ex, ey, ez]),
-      brasD: membre(g.bras, [-ex, ey, ez]),
+      brasD: membre(g.brasD ?? g.bras, [-ex, ey, ez]),
     };
     scene.add(racine);
-    return { racine, parties, type, allure: ALLURES[type.id], cible: null, phase: Math.random() * 6, mort: -1, choc: 0, vitesse: 0 };
+    return {
+      racine, parties, type, allure: ALLURES[type.id], cible: null, phase: Math.random() * 6, mort: -1, choc: 0, vitesse: 0,
+      levee: type.boss ? DUREE_LEVEE : 0, cri: 0,
+    };
   }
 
   function hauteur(x, z) {
@@ -285,6 +376,25 @@ export function creerMonstresVue(scene) {
         p.brasD.rotation.x = -0.35 + s * 0.35;
         p.corps.position.y = -Math.abs(Math.cos(v.phase)) * 0.035;
       }
+    } else if (type.boss) {
+      p.brasG.rotation.z = p.brasD.rotation.z = 0;
+      if (v.cri > 0) {
+        // Il rugit, bras levés, pour appeler la horde.
+        p.brasG.rotation.x = -2.5 + Math.sin(temps * 18) * 0.06;
+        p.brasD.rotation.x = -2.2;
+        p.brasG.rotation.z = 0.45;
+        p.brasD.rotation.z = -0.45;
+      } else if (attaque) {
+        // L'ancre s'abat sur le poteau.
+        const coup = (1 - Math.cos(v.phase)) / 2;
+        p.brasD.rotation.x = -2.9 + coup * 2.6;
+        p.brasG.rotation.x = -1.1 - s * 0.4;
+      } else {
+        // Il marche lourdement en traînant son ancre.
+        p.brasG.rotation.x = -0.3 - s * 0.35;
+        p.brasD.rotation.x = -0.2 + s * 0.08;
+        p.corps.position.y = -Math.abs(Math.cos(v.phase)) * 0.03;
+      }
     } else if (type.id === 'bouffi') {
       p.brasG.rotation.x = -0.8 + s * 0.15;
       p.brasD.rotation.x = -0.8 - s * 0.15;
@@ -299,7 +409,8 @@ export function creerMonstresVue(scene) {
       p.brasG.rotation.x = -1.45 + frappe;
       p.brasD.rotation.x = -1.45 - frappe;
     }
-    p.corps.rotation.x = allure.penche + v.choc;
+    p.corps.rotation.x = (v.cri > 0 ? -0.22 : allure.penche) + v.choc;
+    v.cri = Math.max(0, v.cri - dt);
     // Dandinement : le bouffi bascule à chaque pas, les autres oscillent.
     p.corps.rotation.z = type.id === 'bouffi' ? s * allure.roulis : Math.sin(v.phase * 0.5) * allure.roulis;
     v.choc = Math.min(0, v.choc + dt * 2.5);
@@ -340,16 +451,20 @@ export function creerMonstresVue(scene) {
       temps += dt;
       lueurs.bouffi.color.lerpColors(pulsation[0], pulsation[1], (Math.sin(temps * 5) + 1) / 2);
       const suivi = 1 - Math.exp(-dt * 6);
+      let boss = null;
       for (const [id, v] of vues) {
         const { racine } = v;
         if (v.mort >= 0) {
           v.mort += dt;
-          const t = Math.min(v.mort / DUREE_CHUTE, 1);
+          const duree = v.type.boss ? DUREE_CHUTE_BOSS : DUREE_CHUTE;
+          const t = Math.min(v.mort / duree, 1);
           racine.rotation.x = -t * t * Math.PI * 0.48;
-          racine.position.y -= dt * 0.25 * t;
-          if (v.mort > DUREE_CHUTE + 0.8) retirer(id, v);
+          racine.position.y -= dt * 0.25 * t * racine.scale.y;
+          if (v.type.boss) boss = v;
+          if (v.mort > duree + 0.8) retirer(id, v);
           continue;
         }
+        if (v.type.boss) boss = v;
         let vitesse = immediat && dt > 0 ? v.vitesse / dt : 0;
         if (!immediat && v.cible) {
           const avant = racine.position.clone();
@@ -360,8 +475,37 @@ export function creerMonstresVue(scene) {
           racine.rotation.y += d * suivi;
           vitesse = dt > 0 ? avant.distanceTo(racine.position) / dt : 0;
         }
+        // Le boss monte des profondeurs.
+        if (v.levee > 0) {
+          v.levee = Math.max(0, v.levee - dt);
+          const f = v.levee / DUREE_LEVEE;
+          racine.position.y = hauteur(racine.position.x, racine.position.z) - f * f * PROFONDEUR_LEVEE;
+        }
         animer(v, dt, vitesse);
       }
+      // Le halo suit le boss, devant son torse (dedans, il n'éclairerait que
+      // le sol), et s'éteint à sa mort.
+      if (boss && boss.mort < 0) {
+        const { position, rotation } = boss.racine;
+        halo.position.set(position.x + Math.sin(rotation.y) * 2.6, position.y + 4, position.z + Math.cos(rotation.y) * 2.6);
+        halo.intensity = 22 * (1 - boss.levee / DUREE_LEVEE);
+      } else {
+        halo.intensity = boss ? Math.max(0, halo.intensity - dt * 22) : 0;
+      }
+    },
+
+    // Le boss rugit (il appelle ses renforts).
+    rugir(id) {
+      const v = vues.get(id);
+      if (v) v.cri = 1.6;
+    },
+
+    // Boss enragé : yeux et halo virent au rouge.
+    enrager(oui) {
+      if (oui === enrage) return;
+      enrage = oui;
+      lueurs.boss.color.set(oui ? LUEUR_RAGE : LUEURS.boss);
+      halo.color.set(oui ? LUEUR_RAGE : LUEURS.boss);
     },
 
     // Recul visible à l'impact, avant même la réponse de l'hôte. Un colosse

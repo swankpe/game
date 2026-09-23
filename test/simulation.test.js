@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { creerSimulation, normaliserMonde } from '../src/simulation.js';
 import {
   ARMES, ARMES_DEPART, BONUS_MANCHE, DISTANCE_PORTER, DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE,
-  EXPLOSION_BOUFFI, HAUTEUR_TETE, PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART, RECHARGE_ILLUMINATION, TYPES_ZOMBIES,
-  degatsExplosion, indiceArme, indiceType, monstresParMinute, poidsTypes, positionPortee, premierTouche, pvMonstre,
-  tirerProtege, tirerType, vitesseMonstre,
+  BOSS, EXPLOSION_BOUFFI, HAUTEUR_TETE, PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART, RECHARGE_ILLUMINATION, TYPES_ZOMBIES,
+  degatsExplosion, indiceArme, indiceType, monstresParMinute, poidsTypes, positionPortee, premierTouche, pvBoss,
+  pvMonstre, renfortsBoss, tirerProtege, tirerType, vitesseMonstre,
 } from '../src/regles.js';
 import { BOUTIQUE, CABANE, estPraticable, resoudreCollisions } from '../src/monde.js';
 
@@ -120,7 +120,7 @@ test('sans défense, le protégé meurt : défaite, puis retour au camp', () => 
   assert.equal(sim.etat.monstres.length, 0);
 });
 
-test('survivre 5 minutes gagne la manche ; la suivante a un nouveau protégé et plus de zombies', () => {
+test('survivre 5 minutes puis abattre le boss gagne la manche ; la suivante a un nouveau protégé et plus de zombies', () => {
   const sim = lancer(['a', 'b']);
   const premierProtege = sim.etat.protege;
   let apparus1 = 0;
@@ -133,7 +133,7 @@ test('survivre 5 minutes gagne la manche ; la suivante a un nouveau protégé et
       sim.toucher(m.id, 100);
     }
   };
-  for (let t = 0; t < DUREE_MANCHE + 1 && sim.etat.phase === 'manche'; t += 0.1) {
+  for (let t = 0; t < DUREE_MANCHE + 30 && sim.etat.phase === 'manche'; t += 0.1) {
     sim.pas(0.1, joueurs());
     nettoyer();
   }
@@ -294,7 +294,7 @@ test("on n'achète qu'au comptoir de l'armurerie, avec assez d'argent, et une se
 test('une manche gagnée rapporte un bonus à tous ; une nouvelle partie remet les comptes à zéro', () => {
   const sim = lancer(['a', 'b']);
   sim.etat.comptes.a = { argent: 40, armes: 3 };
-  avancerDefendu(sim, DUREE_MANCHE + 0.5);
+  for (let t = 0; t < DUREE_MANCHE + 30 && sim.etat.phase === 'manche'; t += 0.1) avancerDefendu(sim, 0.1);
   assert.equal(sim.etat.phase, 'pause');
   assert.equal(sim.etat.comptes.a.argent, 40 + BONUS_MANCHE);
   assert.equal(sim.etat.comptes.b.argent, BONUS_MANCHE);
@@ -451,4 +451,104 @@ test('un colosse est plus facile à toucher, et sa tête est plus haute', () => 
   assert.equal(premierTouche([0, 1.2, 0], [0, 0, -1], [{ ...cibles[0], l: 1, h: 1 }]), null, 'un rôdeur au même endroit est manqué');
   assert.ok(!premierTouche([0, HAUTEUR_TETE + 0.1, 0], [0, 0, -1], cibles).tete, 'à hauteur de tête de rôdeur : le torse');
   assert.ok(premierTouche([0, HAUTEUR_TETE * colosse.hauteur + 0.1, 0], [0, 0, -1], cibles).tete);
+});
+
+// Jusqu'à la fin du chrono, en abattant chaque zombie ordinaire dès son arrivée.
+function jusquAuBoss(sim) {
+  while (!sim.etat.boss && sim.etat.phase === 'manche') {
+    sim.pas(0.1, joueurs());
+    for (const m of [...sim.etat.monstres]) if (m.id !== sim.etat.boss?.id) sim.toucher(m.id, 200);
+  }
+  return sim.etat.monstres.find((m) => m.id === sim.etat.boss.id);
+}
+
+test('à la fin du chrono, le boss sort de la mer : la manche continue tant qu’il vit', () => {
+  const sim = lancer(['a', 'b', 'c'], {});
+  const s = sim.etat;
+  const boss = jusquAuBoss(sim);
+  assert.equal(s.reste, 0);
+  assert.equal(boss.k, indiceType('boss'));
+  // Deux défenseurs (le protégé ne compte pas).
+  assert.equal(boss.pv, pvBoss(1, 2));
+  assert.equal(s.boss.pvMax, boss.pv);
+  assert.ok(Math.hypot(boss.x - s.poteau.x, boss.z - s.poteau.z) > 20, 'il arrive de loin');
+  // Les zombies ordinaires continuent d'arriver, moins vite ; la manche attend.
+  const avant = s.prochainId;
+  for (let t = 0; t < 20; t += 0.1) {
+    sim.pas(0.1, joueurs());
+    for (const m of [...s.monstres]) if (m.id !== boss.id) sim.toucher(m.id, 200);
+  }
+  assert.equal(s.phase, 'manche');
+  assert.ok(s.prochainId > avant, 'la horde ne s’arrête pas');
+  // L'abattre gagne la manche et paie le tueur.
+  const tueur = ['a', 'b', 'c'].find((id) => id !== s.protege);
+  while (!sim.toucher(boss.id, 150, tueur));
+  sim.pas(0.1, joueurs());
+  assert.equal(s.phase, 'pause');
+  assert.equal(s.boss, null);
+  assert.equal(s.manche, 2);
+  assert.equal(s.comptes[tueur].argent, TYPES_ZOMBIES[indiceType('boss')].recompense + BONUS_MANCHE);
+});
+
+test('le boss appelle des coureurs en renfort, puis enrage à mi-vie', () => {
+  const sim = lancer();
+  const s = sim.etat;
+  const boss = jusquAuBoss(sim);
+  const nombre = () => s.monstres.filter((m) => m.k === indiceType('coureur')).length;
+  s.cumul = -1e9;
+  for (const m of [...s.monstres]) if (m.id !== boss.id) sim.toucher(m.id, 200);
+  for (let t = 0; t < BOSS.premiereInvocation + 0.2; t += 0.1) sim.pas(0.1, joueurs());
+  assert.equal(s.boss.cris, 1);
+  assert.equal(nombre(), renfortsBoss(1));
+  const proches = s.monstres.filter((m) => m.id !== boss.id).every((m) => Math.hypot(m.x - boss.x, m.z - boss.z) < 5);
+  assert.ok(proches, 'les renforts surgissent autour de lui');
+  assert.ok(renfortsBoss(5) > renfortsBoss(1));
+
+  const vitesse = boss.v;
+  assert.ok(!s.boss.enrage);
+  while (boss.pv > s.boss.pvMax * BOSS.enrage) sim.toucher(boss.id, 100);
+  assert.ok(s.boss.enrage);
+  assert.ok(Math.abs(boss.v - vitesse * BOSS.vitesseEnrage) < 1e-9);
+});
+
+test('le boss résiste davantage à chaque manche et face à plus de défenseurs', () => {
+  assert.equal(pvBoss(1, 1), BOSS.pv);
+  assert.equal(pvBoss(1, 0), BOSS.pv, 'seul en protégé : comme un défenseur');
+  assert.ok(pvBoss(3, 1) > pvBoss(1, 1));
+  assert.ok(pvBoss(1, 3) > pvBoss(1, 2));
+  const boss = TYPES_ZOMBIES[indiceType('boss')];
+  assert.ok(boss.boss && boss.largeur >= 3 && boss.hauteur >= 3);
+  assert.ok(poidsTypes(9, 200).length < TYPES_ZOMBIES.length, 'le boss n’est jamais tiré au sort');
+});
+
+test('au contact du poteau, le boss tue vite : une défaite reste possible', () => {
+  const sim = lancer();
+  const s = sim.etat;
+  const boss = jusquAuBoss(sim);
+  s.cumul = -1e9;
+  s.boss.invocation = 1e9;
+  Object.assign(boss, { x: s.poteau.x + 1.5, z: s.poteau.z });
+  let t = 0;
+  while (s.phase === 'manche' && t < 30) {
+    sim.pas(0.1, joueurs());
+    t += 0.1;
+  }
+  assert.equal(s.phase, 'defaite');
+  assert.ok(t < 6, `le protégé tient ${t.toFixed(1)} s`);
+});
+
+test('un nouvel hôte reprend le combat contre le boss', () => {
+  const sim = lancer();
+  const boss = jusquAuBoss(sim);
+  while (!sim.etat.boss.enrage) sim.toucher(boss.id, 100);
+  sim.etat.boss.cris = 2;
+  const inst = JSON.parse(JSON.stringify(sim.instantane()));
+  assert.deepEqual(inst.bo, [boss.id, sim.etat.boss.pvMax, 2]);
+  const repris = creerSimulation();
+  assert.ok(repris.charger(inst));
+  assert.deepEqual(repris.instantane(), sim.instantane());
+  assert.ok(repris.etat.boss.enrage, 'déjà enragé, il ne le redevient pas');
+  assert.equal(normaliserMonde({ ph: 'manche', bo: [1, -5, 0] }).boss, null);
+  assert.equal(normaliserMonde({ ph: 'manche', bo: 'x' }).boss, null);
+  assert.equal(normaliserMonde({ ph: 'manche' }).boss, null);
 });

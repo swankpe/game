@@ -3,7 +3,7 @@
 // entre l'écran de création et le jeu.
 
 import * as THREE from 'three';
-import { hauteurSol } from './monde.js';
+import { carte } from './monde.js';
 
 export function creerOrbite(camera, element) {
   const reglage = { lacet: 0, tangage: 0.3, distance: 5, min: 2.2, max: 10, tangageMin: -0.15, tangageMax: 1.25 };
@@ -51,7 +51,7 @@ export function creerOrbite(camera, element) {
         Math.sin(tangage),
         Math.cos(lacet) * Math.cos(tangage),
       ).multiplyScalar(distance).add(cible);
-      voulue.y = Math.max(voulue.y, hauteurSol(voulue.x, voulue.z) + 0.35, 0.4);
+      voulue.y = Math.max(voulue.y, carte().hauteurSol(voulue.x, voulue.z) + 0.35, 0.4);
       const t = instantane ? 1 : 1 - Math.exp(-dt * 7);
       camera.position.lerp(voulue, t);
       regard.lerp(cible, instantane ? 1 : 1 - Math.exp(-dt * 10));

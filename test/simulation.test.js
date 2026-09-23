@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { creerSimulation, normaliserMonde } from '../src/simulation.js';
 import {
   ARMES, ARMES_DEPART, BONUS_MANCHE, DISTANCE_PORTER, DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE,
-  BOSS, ETOILES, EXPLOSION_BOUFFI, HAUTEUR_TETE, JOUEUR, LANTERNE, NIVEAU_LANTERNE_MAX, armeAmelioree, PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART, RECHARGE_ILLUMINATION, TYPES_ZOMBIES,
+  BOSS, DUREE_PREPARATION, ETOILES, EXPLOSION_BOUFFI, HAUTEUR_TETE, JOUEUR, LANTERNE, NIVEAU_LANTERNE_MAX, armeAmelioree, PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART, RECHARGE_ILLUMINATION, TYPES_ZOMBIES,
   degatsExplosion, indiceArme, indiceType, monstresParMinute, poidsTypes, positionPortee, premierTouche, pvBoss,
   pvMonstre, renfortsBoss, tirerProtege, tirerType, vitesseMonstre,
 } from '../src/regles.js';
-import { BOUTIQUE, CABANE, estPraticable, resoudreCollisions } from '../src/monde.js';
+import { BOUTIQUE, CABANE, CARTES, estPraticable, resoudreCollisions } from '../src/monde.js';
 
 const graine = (n) => () => {
   n = (n * 16807) % 2147483647;
@@ -19,7 +19,8 @@ const joueurs = (entrees = {}) => new Map(Object.entries(entrees));
 function lancer(ids = ['a', 'b', 'c', 'd'], options) {
   // Le boss à la fin du chrono, comme en jeu normal (BOSS.apparition peut
   // être avancé pour les essais).
-  const sim = creerSimulation({ aleatoire: graine(42), apparitionBoss: DUREE_MANCHE });
+  // Sans préparation (testée à part) : la manche commence tout de suite.
+  const sim = creerSimulation({ aleatoire: graine(42), apparitionBoss: DUREE_MANCHE, dureePreparation: 0 });
   sim.definirMembres(membres(...ids), options);
   assert.ok(sim.demarrer());
   return sim;
@@ -556,7 +557,7 @@ test('un nouvel hôte reprend le combat contre le boss', () => {
 });
 
 test('le boss peut arriver plus tôt : sa chute gagne la manche sans attendre le chrono', () => {
-  const sim = creerSimulation({ aleatoire: graine(3), apparitionBoss: 60 });
+  const sim = creerSimulation({ aleatoire: graine(3), apparitionBoss: 60, dureePreparation: 0 });
   sim.definirMembres(membres('a'));
   assert.ok(sim.demarrer());
   const s = sim.etat;
@@ -770,4 +771,123 @@ test('lanterne, étoiles et blessures passent d’un hôte à l’autre, vérifi
   assert.equal(n.lanterne, NIVEAU_LANTERNE_MAX);
   assert.deepEqual(n.etoiles, [{ id: 1, x: 0, z: 0, age: 0 }]);
   assert.deepEqual(n.vies, { a: { coups: JOUEUR.coups, terre: true, releve: 1 } });
+});
+
+// --- Préparation et cartes -------------------------------------------------
+
+test('chaque manche commence par une préparation sans zombie, sur la carte de la manche', () => {
+  const sim = creerSimulation({ aleatoire: graine(5), apparitionBoss: DUREE_MANCHE });
+  sim.definirMembres(membres('a', 'b'));
+  assert.ok(sim.demarrer());
+  const s = sim.etat;
+  assert.equal(s.phase, 'preparation');
+  assert.equal(s.reste, DUREE_PREPARATION);
+  assert.equal(s.carte, 0);
+  assert.ok(s.protege, 'le protégé est déjà désigné : on place son poteau');
+  // On porte le poteau pendant la préparation.
+  const d = s.protege === 'a' ? 'b' : 'a';
+  assert.ok(sim.demanderPorter(d, joueurs({ [d]: { x: s.poteau.x + 1, z: s.poteau.z, r: 0 } })));
+  const j = joueurs({ [d]: { x: 0, z: 0, r: 0 } });
+  for (let t = 0; t < DUREE_PREPARATION - 1; t += 0.1) sim.pas(0.1, j);
+  assert.equal(s.phase, 'preparation');
+  assert.equal(s.monstres.length, 0, 'aucun zombie pendant la préparation');
+  assert.ok(Math.hypot(s.poteau.x, s.poteau.z) < 2, 'le poteau a suivi son porteur');
+  for (let t = 0; t < 1.5; t += 0.1) sim.pas(0.1, j);
+  assert.equal(s.phase, 'manche');
+  assert.ok(!sim.pret(d), 'on ne se dit prêt que pendant la préparation');
+});
+
+test('tout le monde prêt : la manche commence sans attendre', () => {
+  const sim = creerSimulation({ aleatoire: graine(5) });
+  sim.definirMembres(membres('a', 'b'));
+  sim.demarrer();
+  assert.ok(sim.pret('a'));
+  assert.ok(!sim.pret('intrus'));
+  sim.pas(0.1, joueurs());
+  assert.equal(sim.etat.phase, 'preparation', 'un seul des deux');
+  assert.deepEqual(sim.instantane().rd, ['a']);
+  sim.pret('b');
+  sim.pas(0.1, joueurs());
+  assert.equal(sim.etat.phase, 'manche');
+});
+
+test('la manche 2 se joue dans la cour du château : poteau à son départ, zombies venus du champ', () => {
+  const sim = lancer(['a', 'b']);
+  const s = sim.etat;
+  avancerDefendu(sim, 1);
+  s.reste = 0.05;
+  while (s.phase === 'manche') avancerDefendu(sim, 0.1);
+  avancer(sim, DUREE_PAUSE + 0.2);
+  assert.equal(s.phase, 'manche');
+  assert.equal(s.manche, 2);
+  assert.equal(CARTES[s.carte].id, 'chateau');
+  assert.deepEqual({ x: s.poteau.x, z: s.poteau.z }, CARTES[1].poteau);
+  assert.equal(sim.instantane().ca, 1);
+  avancer(sim, 3);
+  assert.ok(s.monstres.length > 0);
+  for (const m of s.monstres) assert.ok(Math.max(Math.abs(m.x), Math.abs(m.z)) > 22, 'sortis dans le champ, hors des murailles');
+  const repris = creerSimulation();
+  assert.ok(repris.charger(JSON.parse(JSON.stringify(sim.instantane()))));
+  assert.equal(repris.etat.carte, 1);
+});
+
+// Une manche dans la cour du château, sans apparitions.
+function auChateau(ids = ['a', 'b', 'c']) {
+  const sim = lancer(ids);
+  const s = sim.etat;
+  s.carte = 1;
+  s.monstres = [];
+  s.cumul = -1e9;
+  return { sim, s };
+}
+
+test('au château, un zombie du champ passe une porte et monte la rampe jusqu’au poteau sur la terrasse', () => {
+  const { sim, s } = auChateau();
+  Object.assign(s.poteau, { x: 0, z: 0 });
+  const m = seul(sim, 'rodeur', -2, -30);
+  let t = 0;
+  while (s.pv === PV_PROTEGE && t < 90) {
+    sim.pas(0.1, joueurs());
+    t += 0.1;
+  }
+  assert.ok(s.pv < PV_PROTEGE, `le protégé est atteint (zombie en ${m.x.toFixed(1)}, ${m.z.toFixed(1)})`);
+  assert.equal(CARTES[1].hauteurSol(m.x, m.z), 4, 'sur la terrasse');
+});
+
+test('au pied de la terrasse, un zombie n’atteint pas le poteau posé en haut', () => {
+  const { sim, s } = auChateau();
+  Object.assign(s.poteau, { x: 3.6, z: 0 });
+  const m = seul(sim, 'rodeur', 5.4, 0, { v: 0 });
+  for (let i = 0; i < 20; i++) sim.pas(0.1, joueurs());
+  assert.equal(s.pv, PV_PROTEGE);
+  assert.equal(m.a, false);
+});
+
+test('sur le chemin de ronde, on est hors d’atteinte d’en bas ; il faut monter par l’escalier', () => {
+  const { sim, s } = auChateau();
+  const [d] = ['a', 'b', 'c'].filter((id) => id !== s.protege);
+  const j = joueurs({ [d]: { x: 19.3, z: -8, r: 0 } });
+  const m = seul(sim, 'rodeur', 16.9, -8);
+  for (let i = 0; i < 30; i++) sim.pas(0.1, j);
+  assert.equal(s.vies[d]?.coups ?? 0, 0, 'le zombie en bas ne touche pas');
+  assert.ok(m);
+});
+
+test('le poteau porté ne dégringole pas du bord d’une rampe', () => {
+  const { sim, s } = auChateau();
+  const [d] = ['a', 'b', 'c'].filter((id) => id !== s.protege);
+  const C = CARTES[1];
+  // Porteur au milieu de la rampe de la terrasse, le poteau le suit.
+  Object.assign(s.poteau, { x: 0.4, z: 9 });
+  assert.ok(sim.demanderPorter(d, joueurs({ [d]: { x: 0, z: 9.5, r: Math.PI } })));
+  sim.pas(0.1, joueurs({ [d]: { x: 0, z: 8.5, r: Math.PI } }));
+  const surRampe = { x: s.poteau.x, z: s.poteau.z };
+  assert.ok(C.hauteurSol(surRampe.x, surRampe.z) > 0.5);
+  // Collé au bord : le poteau tomberait dans la cour, il reste où il est.
+  sim.pas(0.1, joueurs({ [d]: { x: -1.3, z: 8, r: -Math.PI / 2 } }));
+  assert.deepEqual({ x: s.poteau.x, z: s.poteau.z }, surRampe);
+  // D'en bas, on ne saisit pas le poteau posé sur la terrasse.
+  sim.poser(d);
+  Object.assign(s.poteau, { x: 3.5, z: 0 });
+  assert.ok(!sim.demanderPorter(d, joueurs({ [d]: { x: 5.2, z: 0, r: 0 } })));
 });

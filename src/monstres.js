@@ -10,11 +10,10 @@
 
 import * as THREE from 'three';
 import { colorer, fusionnerGeometries, place } from './geometrie.js';
-import { hauteurTerrain } from './monde.js';
+import { carte } from './monde.js';
 import { HAUTEUR_MONSTRE, RAYON_MONSTRE, TYPES_ZOMBIES, premierTouche } from './regles.js';
 
 const PROFIL_TETE = [[0, 0], [0.13, 0.02], [0.19, 0.09], [0.205, 0.19], [0.185, 0.3], [0.195, 0.41], [0.18, 0.51], [0.12, 0.59], [0, 0.63]];
-const PROFONDEUR_MAX = -2.2;
 const DUREE_CHUTE = 0.7;
 
 const cylindre = (rh, rb, h, cotes, pos, couleur, variation = 0.1) =>
@@ -346,7 +345,7 @@ export function creerMonstresVue(scene) {
   }
 
   function hauteur(x, z) {
-    return Math.max(hauteurTerrain(x, z), PROFONDEUR_MAX);
+    return carte().hauteurPieds(x, z);
   }
 
   function retirer(id, v) {

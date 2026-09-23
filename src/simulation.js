@@ -1,21 +1,27 @@
-// La partie telle que la fait tourner l'hôte : manches, zombies, boss de fin
-// de manche, vie du protégé et des défenseurs, poteau, lanterne, étoiles,
-// Illumination. Aucun Three.js ni réseau :
+// La partie telle que la fait tourner l'hôte : préparation et manches (une
+// carte par manche), zombies, boss de fin de manche, vie du protégé et des
+// défenseurs, poteau, lanterne, étoiles, Illumination. Aucun Three.js ni réseau :
 // l'hôte appelle pas() à chaque image et diffuse instantane() ; si l'hôte
 // s'en va, le suivant reprend avec charger(dernier instantané reçu).
 
-import { BOUTIQUE, estPraticable, rayonIle, resoudreCollisions } from './monde.js';
+import { CARTES, carteDeManche } from './monde.js';
+import { PAS_MAX } from './navigation.js';
 import {
   ARMES, ARMES_DEPART, BONUS_DEGATS_MAX, BONUS_MANCHE, BOSS, DEGATS_MONSTRE, DISTANCE_BOUTIQUE, DISTANCE_PORTER,
-  DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE, ETOILES, EXPLOSION_BOUFFI, JOUEUR, LANTERNE,
+  DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE, DUREE_PREPARATION, ETOILES, EXPLOSION_BOUFFI, JOUEUR, LANTERNE,
   MONSTRES_MAX, NIVEAU_LANTERNE_MAX, PORTEE_ATTAQUE, POTEAU_DEPART, PV_PROTEGE, RAYON_MONSTRE, RECHARGE_ILLUMINATION,
   TYPES_ZOMBIES, degatsExplosion, indiceArme, monstresParMinute, poidsTypes, positionPortee, pvBoss, pvMonstre,
   renfortsBoss, tirerProtege, tirerType, vitesseMonstre,
 } from './regles.js';
 
-export const PHASES = ['attente', 'manche', 'pause', 'defaite'];
+export const PHASES = ['attente', 'preparation', 'manche', 'pause', 'defaite'];
 
 const ESPACEMENT = 0.7;
+// Écart de hauteur au-delà duquel on ne s'atteint plus (zombie au pied de la
+// terrasse, joueur sur le chemin de ronde…).
+const ECART_ATTEINTE = 1.6;
+// Le poteau porté ne saute pas d'un étage à l'autre.
+const ECART_POTEAU = 1;
 // Une explosion reste dans les instantanés le temps que tous la reçoivent.
 const DUREE_EXPLOSION = 1.5;
 const EXPLOSIONS_MAX = 12;
@@ -26,6 +32,10 @@ function etatInitial() {
   return {
     phase: 'attente',
     manche: 0,
+    // Indice de la carte (CARTES dans monde.js) ; l'île au camp.
+    carte: 0,
+    // Joueurs prêts pendant la préparation.
+    prets: [],
     reste: 0,
     pv: PV_PROTEGE,
     protege: null,
@@ -62,8 +72,9 @@ function etatInitial() {
 const DEGATS_MAX = Math.max(...ARMES.map((a) => a.degats * 2)) * BONUS_DEGATS_MAX;
 const niveauxVides = () => ARMES.map(() => 0);
 
-// apparitionBoss : secondes de manche avant le boss (BOSS.apparition par défaut).
-export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS.apparition } = {}) {
+// apparitionBoss : secondes de manche avant le boss (BOSS.apparition par
+// défaut) ; dureePreparation : 0 pour passer directement à la manche.
+export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS.apparition, dureePreparation = DUREE_PREPARATION } = {}) {
   let s = etatInitial();
   let membres = [];
   let roleSolo = 'defenseur';
@@ -71,6 +82,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
   // hors du pas par un tir, en ont besoin pour toucher les joueurs).
   let joueursConnus = new Map();
 
+  const carte = () => CARTES[s.carte] ?? CARTES[0];
   const compte = (id) => (s.comptes[id] ??= { argent: 0, armes: ARMES_DEPART, niveaux: niveauxVides() });
   const vie = (id) => (s.vies[id] ??= { coups: 0, terre: false, releve: 0, repit: 0, calme: 0, seul: 0 });
   const estMembre = (id) => membres.some((j) => j.id === id);
@@ -79,21 +91,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
     .filter(([id]) => id !== s.protege && estMembre(id) && !s.vies[id]?.terre)
     .map(([id, j]) => ({ id, ...j }));
 
-  // Point de sortie de l'eau, du côté opposé au poteau de préférence : le
-  // plus loin parmi quelques essais, ou le premier assez loin. large : plus
-  // loin du rivage (le boss sort des eaux profondes).
-  function pointDeSortie({ large = 1.16, essais = 6, assezLoin = 18 } = {}) {
-    let meilleur = null;
-    for (let essai = 0; essai < essais; essai++) {
-      const angle = aleatoire() * Math.PI * 2;
-      const r = rayonIle(angle) * large;
-      const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
-      const d = Math.hypot(x - s.poteau.x, z - s.poteau.z);
-      if (!meilleur || d > meilleur.d) meilleur = { x, z, d };
-      if (d > assezLoin) break;
-    }
-    return meilleur;
-  }
+  const pointDeSortie = (options) => carte().pointDeSortie(aleatoire, s.poteau, options);
 
   function ajouterMonstre(k, x, z, pv = null) {
     const type = TYPES_ZOMBIES[k];
@@ -141,9 +139,27 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
     const n = renfortsBoss(s.manche);
     for (let i = 0; i < n && s.monstres.length < MONSTRES_MAX; i++) {
       const a = (i / n) * Math.PI * 2 + aleatoire();
-      const p = resoudreCollisions(boss.x + Math.cos(a) * 2.6, boss.z + Math.sin(a) * 2.6);
+      const p = carte().resoudreCollisions(boss.x + Math.cos(a) * 2.6, boss.z + Math.sin(a) * 2.6);
       ajouterMonstre(K_COUREUR, p.x, p.z);
     }
+  }
+
+  // Avant chaque manche : sa carte, le poteau à son point de départ, pas de
+  // zombie. On achète, on place le poteau, et l'on se déclare prêt.
+  function commencerPreparation() {
+    s.carte = carteDeManche(s.manche);
+    s.poteau = { ...carte().poteau, porteur: null };
+    s.monstres = [];
+    s.boss = null;
+    s.etoiles = [];
+    s.explosions = [];
+    s.vies = {};
+    s.releves = {};
+    s.prets = [];
+    s.pv = PV_PROTEGE;
+    s.phase = 'preparation';
+    s.reste = dureePreparation;
+    if (dureePreparation <= 0) commencerManche();
   }
 
   function gagnerManche() {
@@ -188,7 +204,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
     let p = null;
     for (let t = 0; t <= 1 && !p; t += 0.05) {
       const px = x + (s.poteau.x - x) * t, pz = z + (s.poteau.z - z) * t;
-      if (estPraticable(px, pz)) p = resoudreCollisions(px, pz);
+      if (carte().estPraticable(px, pz)) p = carte().resoudreCollisions(px, pz);
     }
     if (!p) return;
     s.etoiles.push({ id: s.prochaineEtoile++, x: p.x, z: p.z, age: 0 });
@@ -285,6 +301,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
   }
 
   function commencerManche() {
+    s.prets = [];
     s.phase = 'manche';
     s.reste = DUREE_MANCHE;
     s.pv = PV_PROTEGE;
@@ -299,16 +316,27 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
   function avancerMonstres(dt) {
     const vitesse = vitesseMonstre(s.manche);
     const auContact = [];
-    const cibles = defenseursDebout();
+    const c = carte();
+    // Sur une carte à murailles, les zombies suivent le champ de distances ;
+    // sinon, ils vont droit et glissent le long des obstacles.
+    const nav = c.navigation();
+    const cibles = defenseursDebout().map((j) => ({ ...j, h: c.hauteurSol(j.x, j.z) }));
+    const hPoteau = c.hauteurSol(s.poteau.x, s.poteau.z);
+    const avant = new Map();
     for (const m of s.monstres) {
       const type = typeDe(m);
       const portee = PORTEE_ATTAQUE + RAYON_MONSTRE * (type.largeur - 1);
+      const hm = c.hauteurPieds(m.x, m.z);
+      avant.set(m, { x: m.x, z: m.z, h: hm });
+      // Distance à parcourir (par les portes et les rampes s'il le faut).
+      const trajet = (x, z) => (nav ? nav.distance(m.x, m.z, x, z) : Math.hypot(x - m.x, z - m.z));
       // Cible : le poteau, ou un défenseur proche (plus proche que le poteau).
-      let px = s.poteau.x, pz = s.poteau.z;
+      let px = s.poteau.x, pz = s.poteau.z, hCible = hPoteau;
       let proie = null;
-      let dCible = Math.hypot(px - m.x, pz - m.z);
+      let dCible = trajet(px, pz);
       for (const j of cibles) {
-        const dj = Math.hypot(j.x - m.x, j.z - m.z);
+        if (Math.hypot(j.x - m.x, j.z - m.z) >= JOUEUR.aggro) continue;
+        const dj = trajet(j.x, j.z);
         if (dj < JOUEUR.aggro && dj < dCible) {
           proie = j;
           dCible = dj;
@@ -317,31 +345,42 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       if (proie) {
         px = proie.x;
         pz = proie.z;
+        hCible = proie.h;
       }
       if (m.j !== (proie?.id ?? null)) {
         // Nouvelle cible : un temps d'élan avant le premier coup.
         m.j = proie?.id ?? null;
         m.t = 0.4;
       }
-      const dx = px - m.x, dz = pz - m.z;
-      const d = Math.hypot(dx, dz);
-      m.r = Math.atan2(dx, dz);
-      if (d > portee) {
-        const pas = Math.min(vitesse * m.v * dt, d - portee * 0.9);
-        const ux = dx / d, uz = dz / d;
-        let suivant = resoudreCollisions(m.x + ux * pas, m.z + uz * pas);
-        // Bloqué contre un mur ou un tronc : il glisse sur le côté.
-        const progres = (suivant.x - m.x) * ux + (suivant.z - m.z) * uz;
+      const d = Math.hypot(px - m.x, pz - m.z);
+      const atteint = d <= portee && Math.abs(hm - hCible) < ECART_ATTEINTE;
+      if (!atteint) {
+        // Prochain point de passage ; tout près de la cible, la cible elle-même.
+        const but = nav ? nav.vers(m.x, m.z, px, pz) : { x: px, z: pz };
+        const versCible = but.x === px && but.z === pz;
+        const dx = but.x - m.x, dz = but.z - m.z;
+        const db = Math.hypot(dx, dz) || 1e-6;
+        m.r = Math.atan2(dx, dz);
+        const pas = Math.max(0, Math.min(vitesse * m.v * dt, versCible ? db - portee * 0.9 : db));
+        const ux = dx / db, uz = dz / db;
+        // On ne monte pas plus d'une marche : les murs arrêtent, on les longe.
+        const libre = (p) => c.hauteurPieds(p.x, p.z) - hm <= PAS_MAX;
+        let suivant = c.resoudreCollisions(m.x + ux * pas, m.z + uz * pas);
+        const progres = libre(suivant) ? (suivant.x - m.x) * ux + (suivant.z - m.z) * uz : -1;
         if (progres < pas * 0.3) {
+          // Bloqué contre un mur ou un tronc : il glisse sur le côté.
           const cote = m.c ?? 1;
-          suivant = resoudreCollisions(m.x - uz * cote * pas + ux * pas * 0.2, m.z + ux * cote * pas + uz * pas * 0.2);
+          suivant = c.resoudreCollisions(m.x - uz * cote * pas + ux * pas * 0.2, m.z + ux * cote * pas + uz * pas * 0.2);
+          if (!libre(suivant)) suivant = { x: m.x, z: m.z };
         }
         m.x = suivant.x;
         m.z = suivant.z;
         m.a = false;
       } else if (type.explosif) {
+        m.r = Math.atan2(px - m.x, pz - m.z);
         auContact.push({ m, poteau: !proie });
       } else if (proie) {
+        m.r = Math.atan2(px - m.x, pz - m.z);
         m.a = true;
         m.t = (m.t ?? 0) - dt;
         if (m.t <= 0) {
@@ -349,6 +388,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
           m.t = JOUEUR.cadence * (type.cadence ?? 1);
         }
       } else {
+        m.r = Math.atan2(px - m.x, pz - m.z);
         m.a = true;
         s.pv -= DEGATS_MONSTRE * type.degats * dt;
       }
@@ -380,7 +420,12 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
         }
       }
     }
-    for (const m of s.monstres) Object.assign(m, resoudreCollisions(m.x, m.z));
+    for (const m of s.monstres) {
+      Object.assign(m, c.resoudreCollisions(m.x, m.z));
+      // Poussé contre un mur par la foule : il reste où il était.
+      const p = avant.get(m);
+      if (p && c.hauteurPieds(m.x, m.z) - p.h > PAS_MAX) Object.assign(m, { x: p.x, z: p.z });
+    }
   }
 
   function suivrePorteur(joueurs) {
@@ -392,7 +437,9 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       return;
     }
     const { x, z } = positionPortee(j.x, j.z, j.r);
-    if (estPraticable(x, z)) {
+    const c = carte();
+    // Le poteau reste au niveau du porteur : pas de chute du haut d'une rampe.
+    if (c.estPraticable(x, z) && Math.abs(c.hauteurSol(x, z) - c.hauteurSol(j.x, j.z)) < ECART_POTEAU) {
       s.poteau.x = x;
       s.poteau.z = z;
     }
@@ -424,7 +471,7 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       s.manche = 1;
       s.protege = tirerProtege(membres, { aleatoire, roleSolo });
       s.precedent = s.protege;
-      commencerManche();
+      commencerPreparation();
       return true;
     },
 
@@ -438,8 +485,10 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       for (const e of s.etoiles) e.age += dt;
       s.etoiles = s.etoiles.filter((e) => e.age < ETOILES.duree);
       if (s.phase === 'manche' || s.phase === 'pause') {
+        const c = carte();
         for (const j of defenseursDebout()) {
-          const e = s.etoiles.find((x) => Math.hypot(x.x - j.x, x.z - j.z) <= ETOILES.rayon);
+          const hj = c.hauteurSol(j.x, j.z);
+          const e = s.etoiles.find((x) => Math.hypot(x.x - j.x, x.z - j.z) <= ETOILES.rayon && Math.abs(c.hauteurSol(x.x, x.z) - hj) < ECART_ATTEINTE);
           if (!e) continue;
           s.etoiles.splice(s.etoiles.indexOf(e), 1);
           ramasser(j.id, Number.isInteger(j.ar) ? j.ar : 0);
@@ -482,9 +531,13 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
         } else if (s.boss && !bossEnJeu()) {
           gagnerManche();
         }
+      } else if (s.phase === 'preparation') {
+        s.reste -= dt;
+        const tousPrets = membres.length > 0 && membres.every((m) => s.prets.includes(m.id));
+        if (s.reste <= 0 || tousPrets) commencerManche();
       } else if (s.phase === 'pause') {
         s.reste -= dt;
-        if (s.reste <= 0) commencerManche();
+        if (s.reste <= 0) commencerPreparation();
       } else if (s.phase === 'defaite') {
         s.reste -= dt;
         if (s.reste <= 0) {
@@ -511,7 +564,8 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       const indice = indiceArme(idArme);
       if (indice <= 0 || !membres.some((j) => j.id === id) || id === s.protege) return false;
       const j = joueurs.get(id);
-      if (!j || Math.hypot(j.x - BOUTIQUE.x, j.z - BOUTIQUE.z) > DISTANCE_BOUTIQUE) return false;
+      const boutique = carte().boutique;
+      if (!j || Math.hypot(j.x - boutique.x, j.z - boutique.z) > DISTANCE_BOUTIQUE) return false;
       const c = compte(id);
       const bit = 1 << indice;
       if (c.armes & bit || c.argent < ARMES[indice].prix) return false;
@@ -524,7 +578,8 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
     ameliorerLanterne(id, joueurs) {
       if (!estMembre(id) || id === s.protege || s.lanterne >= NIVEAU_LANTERNE_MAX) return false;
       const j = joueurs.get(id);
-      if (!j || Math.hypot(j.x - BOUTIQUE.x, j.z - BOUTIQUE.z) > DISTANCE_BOUTIQUE) return false;
+      const boutique = carte().boutique;
+      if (!j || Math.hypot(j.x - boutique.x, j.z - boutique.z) > DISTANCE_BOUTIQUE) return false;
       const c = compte(id);
       const prix = LANTERNE.prix[s.lanterne];
       if (c.argent < prix) return false;
@@ -549,6 +604,8 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
       if (s.poteau.porteur || id === s.protege || s.phase === 'defaite' || s.vies[id]?.terre) return false;
       const j = joueurs.get(id);
       if (!j || Math.hypot(j.x - s.poteau.x, j.z - s.poteau.z) > DISTANCE_PORTER) return false;
+      const c = carte();
+      if (Math.abs(c.hauteurSol(j.x, j.z) - c.hauteurSol(s.poteau.x, s.poteau.z)) > ECART_POTEAU) return false;
       s.poteau.porteur = id;
       return true;
     },
@@ -556,6 +613,13 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
     poser(id) {
       if (s.poteau.porteur !== id) return false;
       s.poteau.porteur = null;
+      return true;
+    },
+
+    // Pendant la préparation, chacun se déclare prêt (Entrée).
+    pret(id) {
+      if (s.phase !== 'preparation' || !estMembre(id)) return false;
+      if (!s.prets.includes(id)) s.prets.push(id);
       return true;
     },
 
@@ -571,6 +635,8 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
         type: 'monde',
         ph: s.phase,
         ma: s.manche,
+        ca: s.carte,
+        rd: [...s.prets],
         re: arrondi(s.reste, 1),
         pv: arrondi(s.pv, 1),
         pr: s.protege,
@@ -612,6 +678,8 @@ export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS
         explosions: i.explosions.map((e) => ({ ...e, age: 0 })),
         prochaineExplosion: i.explosions.reduce((max, e) => Math.max(max, e.id), 0) + 1,
       };
+      s.carte = i.carte;
+      s.prets = [...i.prets];
       s.lanterne = i.lanterne;
       s.etoiles = i.etoiles.map((e) => ({ ...e }));
       s.prochaineEtoile = i.etoiles.reduce((max, e) => Math.max(max, e.id), 0) + 1;
@@ -679,6 +747,8 @@ export function normaliserMonde(inst) {
     explosions,
     boss,
     lanterne: Number.isInteger(inst.la) ? Math.min(Math.max(inst.la, 0), NIVEAU_LANTERNE_MAX) : 0,
+    carte: Number.isInteger(inst.ca) && inst.ca >= 0 && inst.ca < CARTES.length ? inst.ca : 0,
+    prets: (Array.isArray(inst.rd) ? inst.rd : []).filter(id).slice(0, 8),
     etoiles,
     vies,
   };

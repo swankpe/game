@@ -3,7 +3,7 @@
 // seconde au plus).
 
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { APPARITION } from './monde.js';
+import { carte } from './monde.js';
 import { animerPersonnage, creerPersonnage, equiperPersonnage, libererPersonnage } from './personnage.js';
 import { ARMES } from './regles.js';
 
@@ -31,8 +31,9 @@ export function creerAvatars(scene) {
       modele.rotation.y = ancien.rotation.y;
       libererPersonnage(ancien);
     } else {
-      modele.position.set(APPARITION.x, 0, APPARITION.z);
-      modele.rotation.y = APPARITION.orientation;
+      const { apparition } = carte();
+      modele.position.set(apparition.x, 0, apparition.z);
+      modele.rotation.y = apparition.orientation;
     }
     avatar.etiquette.removeFromParent();
     avatar.etiquette.position.set(0, modele.userData.sommet + 0.32, 0);

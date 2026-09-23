@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { creerGrenade, libererModele } from './armes.js';
-import { hauteurTerrain } from './monde.js';
+import { carte } from './monde.js';
 import { HAUTEUR_MONSTRE } from './regles.js';
 
 const GRAVITE = 9.8;
@@ -41,8 +41,8 @@ export function creerProjectiles(scene) {
           g.v.y -= GRAVITE * h;
           p.addScaledVector(g.v, h);
           g.t += h;
-          // La surface de la mer arrête aussi la grenade.
-          impact = p.y <= Math.max(hauteurTerrain(p.x, p.z), -0.1) || g.t > DUREE_MAX;
+          // Le sol, un mur, ou la surface de la mer arrêtent la grenade.
+          impact = p.y <= carte().solGrenades(p.x, p.z) || g.t > DUREE_MAX;
           for (const z of zombies) {
             if (impact) break;
             impact = Math.hypot(z.x - p.x, z.z - p.z) < RAYON_CONTACT * (z.l ?? 1) && p.y > z.y && p.y < z.y + HAUTEUR_MONSTRE * (z.h ?? 1);

@@ -1,10 +1,14 @@
-// Rendu de l'île. Tout le décor est fusionné par grandes familles (troncs,
-// palmes, rochers, herbes…) : quelques appels de dessin au lieu de centaines.
+// Rendu de l'île et de l'environnement commun à toutes les cartes (ciel,
+// étoiles, lune, ambiances). Tout le décor est fusionné par grandes familles
+// (troncs, palmes, rochers, herbes…) : quelques appels de dessin au lieu de
+// centaines. La cour du château (rendu-chateau.js) est construite aussi, et
+// l'on montre l'une ou l'autre selon la carte de la manche.
 
 import * as THREE from 'three';
 import { creerModeleArme } from './armes.js';
 import { colorer, fusionner, hachage, place } from './geometrie.js';
-import { CABANE, DECOR, PONTON, estHerbe, hauteurTerrain } from './monde.js';
+import { CABANE, CARTES, DECOR, PONTON, estHerbe, hauteurTerrain } from './monde.js';
+import { creerChateau } from './rendu-chateau.js';
 
 const TEINTES = {
   herbe: '#8dba58',
@@ -388,7 +392,33 @@ export function creerIle(scene) {
 
   const mer = creerMer();
   const bouees = creerBouees();
-  scene.add(creerTerrain(), mer, creerPalmiers(), creerRochers(), creerHerbes(), creerCabane(), creerPonton(), ...bouees);
+  const decors = {
+    ile: new THREE.Group().add(creerTerrain(), mer, creerPalmiers(), creerRochers(), creerHerbes(), creerCabane(), creerPonton(), ...bouees),
+    chateau: creerChateau(),
+  };
+  // Les lampes des décors restent dans la scène, même quand leur décor est
+  // caché (éteintes) : le nombre de lumières ne change pas d'une carte à
+  // l'autre, donc aucun shader à recompiler au changement de carte.
+  const lampes = [];
+  for (const [id, decor] of Object.entries(decors)) {
+    decor.updateMatrixWorld(true);
+    const lumieres = [];
+    decor.traverse((o) => o.isLight && lumieres.push(o));
+    for (const l of lumieres) {
+      scene.attach(l);
+      lampes.push({ id, lumiere: l, intensite: l.intensity });
+    }
+    scene.add(decor);
+  }
+  let carteVue = null;
+  function montrerCarte(indice) {
+    const id = (CARTES[indice] ?? CARTES[0]).id;
+    if (id === carteVue) return;
+    carteVue = id;
+    for (const [nom, decor] of Object.entries(decors)) decor.visible = nom === id;
+    for (const l of lampes) l.lumiere.intensity = l.id === id ? l.intensite : 0;
+  }
+  montrerCarte(0);
 
   // La nuit de cette île : sa portée change avec la lanterne.
   const nuit = { ...AMBIANCES.nuit };
@@ -425,6 +455,8 @@ export function creerIle(scene) {
       for (const [k, c] of Object.entries(couleurs)) c.set(cible[k]);
       appliquer();
     },
+    // Décor de la carte d'indice donné (CARTES dans monde.js).
+    carte: montrerCarte,
     // Jusqu'où l'on voit la nuit (mètres) : la lanterne améliorée repousse le noir.
     vision(loin) {
       nuit.loin = loin;
@@ -432,6 +464,7 @@ export function creerIle(scene) {
     },
     mettreAJour(t, dt = 0) {
       mer.userData.animer(t);
+      if (decors.chateau.visible) decors.chateau.userData.animer(dt);
       for (const b of bouees) {
         b.position.y = Math.sin(t * 1.3 + b.userData.phase) * 0.12;
         b.rotation.z = Math.sin(t * 0.9 + b.userData.phase) * 0.12;

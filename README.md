@@ -9,6 +9,12 @@ lien.
 
 - **4 joueurs** : 1 protégé, 3 défenseurs. Le protégé est tiré au sort à
   chaque manche.
+- **Chaque manche a sa carte** : la manche 1 sur l'île, la 2 dans la cour d'un
+  château, puis on alterne.
+- **Préparation** : chaque manche commence par 30 secondes sans zombie pour
+  acheter ses armes et, surtout, **placer le poteau** au meilleur endroit
+  pour la lumière et la protection. Chacun appuie sur **Entrée** quand il est
+  prêt : tout le monde prêt, la manche commence sans attendre.
 - **Manche de 5 minutes**. Les zombies arrivent de plus en plus vite pendant
   la manche (2,5 fois plus à la fin qu'au début), et chaque manche en amène
   davantage, plus rapides et plus résistants. Au bout des 5 minutes, **le boss**
@@ -48,6 +54,19 @@ bouffis compris (réaction en chaîne), et leurs primes vont à celui qui l'a
 abattu. Abattu trop près du poteau, il blesse quand même le protégé : tire-le
 de loin. La part des coureurs, colosses et bouffis grandit de manche en
 manche ; un message prévient à la première apparition de chaque type.
+
+### La cour du château (manche 2)
+
+Une cour carrée fermée de murailles crénelées, avec quatre tours d'angle.
+Les zombies arrivent du champ, dans le noir, et entrent par **trois portes**
+(nord, sud, ouest). Quatre escaliers mènent au **chemin de ronde**, qui fait
+tout le tour des murailles : de là-haut on tire sans être atteint d'en bas,
+mais les zombies savent prendre les escaliers.
+
+Au centre, une **terrasse** de 4 m entourée d'un muret : c'est le meilleur
+endroit pour le poteau, la lanterne y éclaire toute la cour. On y monte par
+une seule rampe, au sud, face à la porte : à défendre. L'armurerie est un étal
+adossé à la muraille ouest.
 
 ### Le boss : le Roi Noyé
 
@@ -131,6 +150,7 @@ la lanterne et l'Illumination.
 | 1 à 4, molette | changer d'arme |
 | E | porter / poser le poteau, ouvrir l'armurerie |
 | E maintenu | relever un allié à terre |
+| Entrée | lancer la partie (au camp), « je suis prêt » (préparation) |
 | F | Illumination (protégé) |
 | Maj | courir |
 | Espace | sauter |

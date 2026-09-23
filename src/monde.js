@@ -1,6 +1,15 @@
-// Carte de l'île : relief, décor et zones praticables. Fonctions pures,
-// partagées par le rendu (ile.js) et les déplacements (joueur.js), pour que
-// ce qu'on voit et ce qui bloque soient toujours la même chose.
+// Les cartes du jeu et, d'abord, celle de l'île : relief, décor et zones
+// praticables. Fonctions pures, partagées par le rendu (ile.js), les
+// déplacements (joueur.js) et la simulation, pour que ce qu'on voit et ce qui
+// bloque soient toujours la même chose.
+//
+// Chaque manche se joue sur une carte (carteDeManche) : l'île, puis la cour du
+// château (chateau.js), et ainsi de suite. Les fonctions exportées sous leur
+// nom (hauteurSol, resoudreCollisions…) sont celles de l'île ; pour la carte en
+// cours, passer par carte() (navigateur) ou CARTES[s.carte] (simulation).
+
+import * as chateau from './chateau.js';
+import { creerNavigation } from './navigation.js';
 
 export const RAYON_ILE = 30;
 export const RAYON_JOUEUR = 0.35;
@@ -184,4 +193,87 @@ export function resoudreCollisions(x, z) {
     }
   }
   return { x, z };
+}
+
+// Point de sortie des zombies sur l'île : dans l'eau, du côté opposé au
+// poteau de préférence (le plus loin parmi quelques essais, ou le premier
+// assez loin). large : plus loin du rivage (le boss sort des eaux profondes).
+function sortieIle(aleatoire, poteau, { large = 1.16, essais = 6, assezLoin = 18 } = {}) {
+  let meilleur = null;
+  for (let essai = 0; essai < essais; essai++) {
+    const angle = aleatoire() * Math.PI * 2;
+    const r = rayonIle(angle) * large;
+    const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+    const d = Math.hypot(x - poteau.x, z - poteau.z);
+    if (!meilleur || d > meilleur.d) meilleur = { x, z, d };
+    if (d > assezLoin) break;
+  }
+  return { x: meilleur.x, z: meilleur.z };
+}
+
+export const PROFONDEUR_PIEDS = -2.2;
+
+// Interface commune des cartes :
+// - hauteurSol : où l'on marche ; hauteurPieds : où posent les pieds d'un
+//   zombie (sur l'île, il marche au fond de l'eau) ;
+// - solBalles, solGrenades : en dessous, c'est plein ;
+// - navigation() : champ de distances pour contourner les murs, ou null
+//   (sur l'île, on marche droit et on glisse le long des obstacles).
+const ILE = {
+  id: 'ile',
+  nom: 'L’île',
+  conseil: 'Au centre de l’île, la lanterne voit venir les zombies de tous les côtés.',
+  sortieBoss: 'Il sort des flots !',
+  borne: 48,
+  hauteurTerrain,
+  hauteurSol,
+  hauteurPieds: (x, z) => Math.max(hauteurTerrain(x, z), PROFONDEUR_PIEDS),
+  solBalles: hauteurTerrain,
+  // La surface de la mer arrête aussi les grenades.
+  solGrenades: (x, z) => Math.max(hauteurTerrain(x, z), -0.1),
+  estPraticable,
+  resoudreCollisions,
+  pointDeSortie: sortieIle,
+  boutique: BOUTIQUE,
+  apparition: APPARITION,
+  poteau: { x: 6, z: -3 },
+  navigation: () => null,
+};
+
+let navigationChateau = null;
+const CHATEAU = {
+  id: 'chateau',
+  nom: 'La cour du château',
+  conseil: 'Montez le poteau sur la terrasse, au centre : de là-haut, la lanterne éclaire toute la cour. Une seule rampe y mène.',
+  sortieBoss: 'Il surgit des ténèbres !',
+  borne: chateau.BORNE,
+  hauteurTerrain: chateau.hauteurSol,
+  hauteurSol: chateau.hauteurSol,
+  hauteurPieds: chateau.hauteurSol,
+  solBalles: chateau.hauteurSol,
+  solGrenades: chateau.hauteurSol,
+  estPraticable: chateau.estPraticable,
+  resoudreCollisions: chateau.resoudreCollisions,
+  pointDeSortie: chateau.pointDeSortie,
+  boutique: chateau.BOUTIQUE,
+  apparition: chateau.APPARITION,
+  poteau: chateau.POTEAU,
+  navigation: () => (navigationChateau ??= creerNavigation({
+    borne: chateau.BORNE,
+    hauteurSol: chateau.hauteurSol,
+    bloque: (x, z) => !chateau.estPraticable(x, z) || chateau.OBSTACLES.some((o) => Math.hypot(x - o.x, z - o.z) < o.rayon + 0.3),
+  })),
+};
+
+export const CARTES = [ILE, CHATEAU];
+
+// L'île pour la manche 1 (et le camp), le château pour la 2, puis on alterne.
+export const carteDeManche = (manche) => (manche >= 1 ? (manche - 1) % CARTES.length : 0);
+
+let active = ILE;
+// La carte affichée dans ce navigateur (celle de l'instantané reçu).
+export const carte = () => active;
+export function activerCarte(indice) {
+  active = CARTES[indice] ?? ILE;
+  return active;
 }

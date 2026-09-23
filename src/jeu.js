@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { genererApercus } from './apercus.js';
 import { creerArme } from './arme.js';
 import { creerEtoilesVue } from './etoiles.js';
-import { BOUTIQUE, hauteurSol, hauteurTerrain } from './monde.js';
+import { activerCarte, carte } from './monde.js';
 import { creerMonstresVue } from './monstres.js';
 import { creerMusique } from './musique.js';
 import { HAUTEUR_LANTERNE, creerPoteau } from './poteau.js';
@@ -79,14 +79,14 @@ function mondeVide() {
     phase: 'attente', manche: 0, reste: 0, pv: PV_PROTEGE, protege: null,
     poteau: { x: POTEAU_DEPART.x, z: POTEAU_DEPART.z, porteur: null },
     illumination: 0, recharge: 0, tues: 0, monstres: [], comptes: {}, explosions: [], boss: null,
-    lanterne: 0, etoiles: [], vies: {},
+    lanterne: 0, etoiles: [], vies: {}, carte: 0, prets: [],
   };
 }
 
 // Distance jusqu'au sol le long d'un tir (les dunes arrêtent les balles).
 function distanceSol(o, d, max) {
   for (let t = 0.5; t <= max; t += 0.5) {
-    if (o.y + d[1] * t < hauteurTerrain(o.x + d[0] * t, o.z + d[2] * t)) return t;
+    if (o.y + d[1] * t < carte().solBalles(o.x + d[0] * t, o.z + d[2] * t)) return t;
   }
   return null;
 }
@@ -150,6 +150,10 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   let lanternePrecedente = 0;
   // Vue à terre, de 0 (debout) à 1 (au sol), lissée.
   let chuteVue = 0;
+  // Carte affichée (indice dans CARTES), et dernière position valable du
+  // poteau porté : il ne tombe pas du bord d'une rampe.
+  let carteAffichee = 0;
+  let poteauPorte = null;
 
   const estHote = () => membres.length > 0 && membres[0].id === monId;
   const nomDe = (id) => membres.find((m) => m.id === id)?.nom ?? 'Quelqu’un';
@@ -164,7 +168,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   const possede = (id) => (monCompte().armes & (1 << indiceArme(id))) !== 0;
   const pretBoutique = () => {
     const e = joueur.etat;
-    return role() !== 'protege' && !jePorte() && Math.hypot(e.x - BOUTIQUE.x, e.z - BOUTIQUE.z) <= DISTANCE_BOUTIQUE;
+    const { boutique } = carte();
+    return role() !== 'protege' && !jePorte() && Math.hypot(e.x - boutique.x, e.z - boutique.z) <= DISTANCE_BOUTIQUE;
   };
 
   function informer(texte, duree = 1.8) {
@@ -363,7 +368,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       if (explosionsVues.has(e.id)) continue;
       explosionsVues.set(e.id, horloge);
       if (sim) urgent = true;
-      const y = Math.max(hauteurTerrain(e.x, e.z), -0.1) + 1;
+      const y = carte().solGrenades(e.x, e.z) + 1;
       effetExplosion(new THREE.Vector3(e.x, y, e.z), EXPLOSION_BOUFFI.rayon, 'bouffi');
     }
     for (const [id, quand] of explosionsVues) if (horloge - quand > MEMOIRE_EXPLOSION) explosionsVues.delete(id);
@@ -371,7 +376,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
 
   // Premier colosse, premier bouffi de la partie : on prévient.
   function signalerNouveauxTypes() {
-    if (monde.phase !== 'manche') {
+    if (monde.phase !== 'manche' && monde.phase !== 'preparation') {
       alertes = [];
       return;
     }
@@ -404,7 +409,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     const proximite = Math.max(0.35, 1 - Math.hypot(b.x - camera.position.x, b.z - camera.position.z) / 80);
     if (bossVu.id !== b.id) {
       bossVu = { id: b.id, cris: b.cris, enrage: false };
-      annoncer(BOSS.nom, 'Il sort des flots ! Abattez-le pour gagner la manche.', 4);
+      annoncer(BOSS.nom, `${carte().sortieBoss} Abattez-le pour gagner la manche.`, 4);
       sonRugissement(proximite);
       secousse = Math.max(secousse, 0.7);
       if (sim) urgent = true;
@@ -629,6 +634,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     }
     if (r === 'protege' && clavier.consommer('KeyF')) action('illuminer', () => sim.demanderIllumination(monId));
     if (monde.phase === 'attente' && clavier.consommer('Enter')) lancer();
+    if (monde.phase === 'preparation' && clavier.consommer('Enter')) action('pret', () => sim.pret(monId));
     const enMain = r !== 'protege' && !jePorte();
     if (enMain && clavier.consommer('KeyR')) recharger();
     // Chargeur vide (après un changement d'arme, par exemple) : on recharge.
@@ -638,9 +644,11 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
 
   function pretAPorter() {
     const e = joueur.etat;
+    const c = carte();
     return (
       role() !== 'protege' && !monde.poteau.porteur && monde.phase !== 'defaite' &&
-      Math.hypot(e.x - monde.poteau.x, e.z - monde.poteau.z) <= DISTANCE_PORTER
+      Math.hypot(e.x - monde.poteau.x, e.z - monde.poteau.z) <= DISTANCE_PORTER &&
+      Math.abs(c.hauteurSol(e.x, e.z) - c.hauteurSol(monde.poteau.x, monde.poteau.z)) < 1
     );
   }
 
@@ -672,19 +680,25 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   function placerPoteau(dt) {
     const { porteur } = monde.poteau;
     let x = monde.poteau.x, z = monde.poteau.z;
+    // Le poteau porté suit son porteur, à son niveau (même règle que l'hôte).
+    const porte = (px, pz, r) => {
+      const p = positionPortee(px, pz, r);
+      const c = carte();
+      if (c.estPraticable(p.x, p.z) && Math.abs(c.hauteurSol(p.x, p.z) - c.hauteurSol(px, pz)) < 1) poteauPorte = p;
+      orientationPoteau = r;
+      return poteauPorte ?? { x, z };
+    };
     if (porteur === monId) {
       const e = joueur.etat;
-      ({ x, z } = positionPortee(e.x, e.z, e.orientation));
-      orientationPoteau = e.orientation;
+      ({ x, z } = porte(e.x, e.z, e.orientation));
     } else if (porteur) {
       const p = avatars.positionDe(porteur);
-      if (p) {
-        ({ x, z } = positionPortee(p.x, p.z, p.r));
-        orientationPoteau = p.r;
-      }
+      if (p) ({ x, z } = porte(p.x, p.z, p.r));
+    } else {
+      poteauPorte = null;
     }
     const leve = porteur ? LEVEE_POTEAU : 0;
-    const y = hauteurSol(x, z);
+    const y = carte().hauteurSol(x, z);
     const { protege } = monde;
     const distant = protege && protege !== monId ? avatars.positionDe(protege) : null;
     if (protege === monId) orientationPoteau = vue.etat.lacet + Math.PI;
@@ -721,17 +735,37 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     return { x, y, z, leve };
   }
 
+  function changerCarte(indice) {
+    carteAffichee = indice;
+    activerCarte(indice);
+    ile.carte(indice);
+    monstres.vider();
+    etoiles.vider();
+    projectiles.vider();
+    poteauPorte = null;
+    const a = carte().apparition;
+    joueur.teleporter(a.x + (Math.random() - 0.5) * 4, a.z + (Math.random() - 0.5) * 2, a.orientation);
+    if (fps) vue.orienter(a.orientation - Math.PI, 0);
+    envoyerEtat(true);
+  }
+
   // --- Changements de phase ------------------------------------------------
 
   function suivreChangements() {
     const { phase, manche, protege, pv, illumination } = monde;
     if (phase !== precedent.phase || manche !== precedent.manche) {
       if (sim) urgent = true;
-      if (phase === 'manche') {
+      if (phase === 'preparation') {
+        const detail =
+          protege === monId ? 'Tu es le protégé : fais-toi porter au meilleur endroit, puis dirige la lanterne.'
+            : `Placez le poteau (${protege ? nomDe(protege) : 'le mannequin'}) et achetez vos armes : ${Math.round(monde.reste)} s.`;
+        annoncer(`Manche ${manche} · ${carte().nom}`, detail, 5);
+        alertes.push(carte().conseil);
+      } else if (phase === 'manche') {
         const detail =
           protege === monId ? "Tu es le protégé : dirige la lanterne, F pour l'Illumination."
             : protege ? `Protège ${nomDe(protege)} !` : 'Protège le mannequin !';
-        annoncer(`Manche ${manche}`, detail);
+        annoncer('Les zombies arrivent !', detail, 3);
       } else if (phase === 'pause') {
         const suivant = protege === monId ? 'toi' : protege ? nomDe(protege) : 'le mannequin';
         const detail = `+${BONUS_MANCHE} $ pour chacun · prochain protégé : ${suivant}`;
@@ -774,7 +808,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     if (phase !== 'manche') bossVu = { id: null, cris: 0, enrage: false };
     // Chaque manche repart chargeurs pleins ; une nouvelle partie oublie les
     // types déjà vus.
-    if (phase === 'manche' && (precedent.phase !== 'manche' || manche !== precedent.manche)) {
+    if ((phase === 'preparation' || phase === 'manche') && phase !== precedent.phase) {
       annulerRechargement();
       munitions = pleins(monCompte().niveaux);
       if (manche === 1) typesVus.clear();
@@ -837,8 +871,10 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     $('lancement').hidden = enPartie;
     $('modifier').hidden = enPartie;
     if (enPartie) {
+      const prets = (monde.prets ?? []).length;
       const chrono = monde.phase === 'manche' ? (monde.boss ? 'Boss !' : minutes(monde.reste))
-        : monde.phase === 'pause' ? `reprise dans ${Math.ceil(monde.reste)} s` : '';
+        : monde.phase === 'preparation' ? `préparation ${minutes(monde.reste)} · prêts ${prets}/${membres.length}`
+          : monde.phase === 'pause' ? `carte suivante dans ${Math.ceil(monde.reste)} s` : '';
       $('manche').textContent = `Manche ${monde.phase === 'pause' ? monde.manche - 1 : monde.manche}`;
       $('chrono').textContent = chrono;
       $('tues').textContent = `${monde.tues} zombie${monde.tues > 1 ? 's' : ''} éliminé${monde.tues > 1 ? 's' : ''}`;
@@ -940,10 +976,15 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     if (boutiqueOuverte) rafraichirBoutique();
     $('reprendre').hidden = !fps || boutiqueOuverte || vue.etat.verrouille || vue.etat.impossible;
 
+    const pret = (monde.prets ?? []).includes(monId);
     $('aide').textContent =
-      r === 'protege' ? 'Souris : diriger la lanterne · F : Illumination'
-        : jePorte() ? 'Tu portes le poteau : pas de tir, tu avances moins vite'
-          : 'ZQSD : marcher · Clic : tirer · R : recharger · 1-4 ou molette : arme · E : poteau / armurerie · Maj : courir · Échap : souris';
+      monde.phase === 'preparation' && !pret ? (r === 'protege'
+        ? 'Préparation : fais-toi porter au bon endroit · Souris : lanterne · Entrée : je suis prêt'
+        : 'Préparation : E : porter le poteau · armurerie · Entrée : je suis prêt')
+        : monde.phase === 'preparation' ? 'Prêt ! La manche commence quand tout le monde l’est.'
+          : r === 'protege' ? 'Souris : diriger la lanterne · F : Illumination'
+            : jePorte() ? 'Tu portes le poteau : pas de tir, tu avances moins vite'
+              : 'ZQSD : marcher · Clic : tirer · R : recharger · 1-4 ou molette : arme · E : poteau / armurerie · Maj : courir · Échap : souris';
 
     degats = Math.max(0, degats - dt * 2.5);
     // À terre, le voile rouge reste.
@@ -1003,6 +1044,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       poteau.occuper('personne');
       poteau.allumer(0);
       ile.ambiance('jour');
+      if (carteAffichee !== 0) changerCarte(0);
     },
 
     // liste : membres admis, dans l'ordre du salon (le premier est l'hôte).
@@ -1065,6 +1107,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           illuminer: () => sim.demanderIllumination(de),
           acheter: () => typeof d.arme === 'string' && sim.acheter(de, d.arme, positionsJoueurs()),
           lanterne: () => sim.ameliorerLanterne(de, positionsJoueurs()),
+          pret: () => sim.pret(de),
           relever: () => sim.demanderRelever(de, typeof d.cible === 'string' ? d.cible : null),
           lancer: () => {
             sim.definirMembres(membres, { roleSolo });
@@ -1096,6 +1139,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           rechargement: rechargement ? rechargement.id : null,
           progression: rechargement ? (horloge - rechargement.debut) / rechargement.duree : null,
           explosions: [...explosionsVues.keys()],
+          carte: carte().id,
+          prets: monde.prets ?? [],
           vie: vieDe(monId),
           vies: monde.vies,
           etoiles: (monde.etoiles ?? []).map((e) => [e.x, e.z]),
@@ -1142,6 +1187,12 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           urgent = true;
           return true;
         },
+        // Hôte seulement : fin de la préparation, la manche commence.
+        passerPreparation() {
+          if (!sim || sim.etat.phase !== 'preparation') return false;
+          sim.etat.reste = 0.05;
+          return true;
+        },
         // Hôte seulement : le chrono tombe à zéro, le boss arrive.
         finirChrono() {
           if (!sim || sim.etat.phase !== 'manche') return false;
@@ -1184,6 +1235,10 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         monde.illumination = Math.max(0, monde.illumination - dt);
         monde.recharge = Math.max(0, monde.recharge - dt);
       }
+      // Nouvelle carte (préparation d'une manche, retour au camp) : on y arrive
+      // par son entrée ; le protégé, lui, suit son poteau.
+      const indiceCarte = monde.phase === 'attente' ? 0 : monde.carte ?? 0;
+      if (indiceCarte !== carteAffichee) changerCarte(indiceCarte);
       suivreChangements();
       jouerExplosions();
       signalerNouveauxTypes();

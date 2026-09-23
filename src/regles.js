@@ -2,7 +2,11 @@
 // durée ou une cadence ne demande de toucher à rien d'autre.
 
 export const DUREE_MANCHE = 300;
-export const DUREE_PAUSE = 10;
+// Avant chaque manche, sur sa carte : le temps d'acheter ses armes et de
+// placer le poteau (et la lanterne) au meilleur endroit. Tout le monde prêt
+// (Entrée) : on n'attend pas la fin.
+export const DUREE_PREPARATION = 30;
+export const DUREE_PAUSE = 8;
 export const DUREE_DEFAITE = 8;
 
 export const PV_PROTEGE = 100;

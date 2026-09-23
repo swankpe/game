@@ -4,7 +4,7 @@
 // matières qui brillent d'elles-mêmes. Une réserve fixe de modèles suffit.
 
 import * as THREE from 'three';
-import { hauteurSol } from './monde.js';
+import { carte } from './monde.js';
 import { ETOILES } from './regles.js';
 
 const CLIGNOTE = 5;
@@ -80,7 +80,7 @@ export function creerEtoilesVue(scene) {
           r = reserve.find((x) => x.id === null);
           if (!r) continue;
           r.id = e.id;
-          r.groupe.position.set(e.x, hauteurSol(e.x, e.z), e.z);
+          r.groupe.position.set(e.x, carte().hauteurSol(e.x, e.z), e.z);
           r.phase = Math.random() * 6;
           r.groupe.visible = true;
         }

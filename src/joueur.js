@@ -1,12 +1,15 @@
 // Joueur local : clavier et déplacements. Les touches sont lues par position
 // physique (event.code) : ZQSD sur un clavier AZERTY, WASD en QWERTY.
 
-import { APPARITION, estPraticable, hauteurSol, resoudreCollisions } from './monde.js';
+import { carte } from './monde.js';
 
 const MARCHE = 4.2;
 const COURSE = 7.5;
 const SAUT = 5.4;
 const GRAVITE = 15;
+// Plus haute marche qu'on franchit sans sauter. En sautant (≈ 1 m), on monte
+// sur un muret, pas sur une muraille ni par-dessus un parapet.
+const MARCHE_MAX = 0.55;
 
 export function creerClavier() {
   const enfoncees = new Set();
@@ -56,22 +59,27 @@ function angleVers(depart, arrivee, t) {
 
 export function creerJoueur() {
   const decalage = (Math.random() - 0.5) * 6;
+  const depart = carte().apparition;
   const etat = {
-    x: APPARITION.x,
-    z: APPARITION.z + decalage,
-    y: hauteurSol(APPARITION.x, APPARITION.z + decalage),
+    x: depart.x,
+    z: depart.z + decalage,
+    y: carte().hauteurSol(depart.x, depart.z + decalage),
     vx: 0, vz: 0, vy: 0,
     auSol: true,
-    orientation: APPARITION.orientation,
+    orientation: depart.orientation,
     vitesse: 0,
   };
 
   function deplacer(nx, nz) {
-    const libre = resoudreCollisions(nx, nz);
-    // Glisser le long du rivage : on garde l'axe qui reste praticable.
-    if (estPraticable(libre.x, libre.z)) return libre;
-    if (estPraticable(libre.x, etat.z)) return { x: libre.x, z: etat.z };
-    if (estPraticable(etat.x, libre.z)) return { x: etat.x, z: libre.z };
+    const c = carte();
+    // Praticable, et pas plus haut qu'une marche au-dessus de nos pieds.
+    const ok = (p) => c.estPraticable(p.x, p.z) && c.hauteurSol(p.x, p.z) <= etat.y + MARCHE_MAX;
+    const libre = c.resoudreCollisions(nx, nz);
+    // Glisser le long du rivage ou d'un mur : on garde l'axe qui reste praticable.
+    if (ok(libre)) return libre;
+    const enX = { x: libre.x, z: etat.z }, enZ = { x: etat.x, z: libre.z };
+    if (ok(enX)) return enX;
+    if (ok(enZ)) return enZ;
     return { x: etat.x, z: etat.z };
   }
 
@@ -80,7 +88,7 @@ export function creerJoueur() {
     teleporter(x, z, orientation = etat.orientation) {
       etat.x = x;
       etat.z = z;
-      etat.y = hauteurSol(x, z);
+      etat.y = carte().hauteurSol(x, z);
       etat.vx = etat.vz = etat.vy = 0;
       etat.orientation = orientation;
     },
@@ -110,7 +118,7 @@ export function creerJoueur() {
       if (orientation !== null) etat.orientation = orientation;
       else if (norme > 0) etat.orientation = angleVers(etat.orientation, Math.atan2(dx, dz), 1 - Math.exp(-dt * 12));
 
-      const sol = hauteurSol(etat.x, etat.z);
+      const sol = carte().hauteurSol(etat.x, etat.z);
       if (etat.auSol && saut) {
         etat.vy = SAUT;
         etat.auSol = false;

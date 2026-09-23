@@ -25,8 +25,8 @@ franches, personnages à tête de cacahuète et yeux globuleux.
 ## Qui décide quoi
 
 Le premier membre du salon (`membres[0]`, voir `salon.js`) est **l'hôte** : son
-navigateur fait tourner `src/simulation.js` (manches, zombies, vie du protégé,
-poteau, Illumination) et diffuse `instantane()` 6 fois par seconde (1 fois au
+navigateur fait tourner `src/simulation.js` (préparation et manches, carte de
+chaque manche, zombies, vie du protégé, poteau, Illumination) et diffuse `instantane()` 6 fois par seconde (1 fois au
 camp). Les autres affichent l'état reçu et envoient leurs actions ; l'hôte les
 valide.
 
@@ -37,7 +37,7 @@ valide.
 | `tirs` | le tireur | paquet de balles (100 ms) : trajectoires, et `m`, `dg` si un zombie est touché |
 | `grenade` | le tireur | départ et vitesse : chaque navigateur simule la même trajectoire |
 | `explosion` | le tireur | zombies touchés par sa grenade et dégâts |
-| `porter`, `poser`, `illuminer`, `lancer`, `acheter`, `lanterne` | un joueur | demande que seul l'hôte applique |
+| `porter`, `poser`, `illuminer`, `lancer`, `acheter`, `lanterne`, `pret` | un joueur | demande que seul l'hôte applique |
 | `relever` | un joueur | début (`cible` : l'allié à terre) ou fin (`cible: null`) d'une relève, E maintenu |
 
 Le tireur détecte lui-même l'impact (sur les zombies tels qu'il les voit) : entre
@@ -58,6 +58,14 @@ le fait apparaître ; la manche n'est gagnée que lorsqu'il a disparu de la list
 cris (renforts) sont un compteur dans `bo` : chaque navigateur rugit quand il
 augmente ; la rage se déduit de ses points de vie. Barre de vie, musique et
 annonces se déduisent donc de l'instantané, sans message à part.
+
+Phases : `attente` (camp, sur l'île) → `preparation` (30 s, carte de la
+manche, poteau à son départ, pas de zombie ; tous prêts : on passe) →
+`manche` → `pause` (8 s, encore sur l'ancienne carte) → `preparation` de la
+manche suivante… Les cartes (`CARTES` dans `monde.js`) partagent une même
+interface ; la simulation lit `CARTES[s.carte]`, le navigateur `carte()`,
+activée quand l'instantané annonce une autre carte (`ca`) : chacun se
+téléporte alors à son entrée.
 
 Les zombies visent aussi les défenseurs : l'hôte les connaît par les
 positions reçues (`joueurs` passé à `pas()`, avec l'arme en main `ar`), donne
@@ -85,8 +93,11 @@ message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
 | `src/salon.js` | code du salon, ordre des joueurs, admission ou refus (4 maximum) |
 | `src/partie.js` | entrée dans un salon au-dessus d'un transport |
 | `src/reseau/` | transports : Supabase (en ligne) ou `BroadcastChannel` (onglets, sans configuration) |
-| `src/monde.js` | relief, décor, collisions : partagés par rendu, physique et simulation |
-| `src/ile.js` | rendu de l'île et des trois ambiances (jour, nuit, Illumination) |
+| `src/monde.js` | registre des cartes (`CARTES`, `carteDeManche`, `carte()`), et relief, décor, collisions de l'île |
+| `src/chateau.js` | la cour du château : blocs et rampes (carte de hauteurs), obstacles, sorties, sans Three.js |
+| `src/navigation.js` | champ de distances (Dijkstra sur une grille de 1 m) : les zombies passent les portes et prennent les rampes |
+| `src/rendu-chateau.js` | rendu de la cour, construit depuis les mêmes blocs que la carte |
+| `src/ile.js` | rendu de l'île, ambiances (jour, nuit, Illumination), bascule d'une carte à l'autre |
 | `src/geometrie.js` | pièces low-poly colorées par sommet puis fusionnées |
 | `src/personnage.js` | perso des joueurs, poses (libre, arme, porte, attache), arme en main |
 | `src/armes.js` | modèles des 4 armes et de la grenade (profils extrudés, biseautés) |
@@ -109,7 +120,10 @@ message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
 npm test
 ```
 
-`node:test` couvre la simulation (manches, défaite, tirage, poteau,
+`node:test` couvre la cour du château (`chateau.test.js` : murailles, portes,
+rampes, chemin de ronde joignable, sorties), la simulation (préparation, vote
+« prêt », rotation des cartes, zombies qui montent sur la terrasse, écarts de
+hauteur, manches, défaite, tirage, poteau,
 Illumination, argent, achats, types de zombies, explosions de bouffis en
 chaîne, boss (apparition, renforts, rage, victoire, reprise), coups sur les
 joueurs et relève, étoiles, lanterne, contournement des obstacles, reprise par un nouvel hôte), les règles,
@@ -122,7 +136,8 @@ Le jeu lui-même ne se vérifie qu'avec Playwright, dans Chromium lancé avec
 `?debug` expose `window.leProtege` : `etat()` (munitions, `progression` du
 rechargement, `ids` des zombies et `boss` compris), `viser(x, y, z)`, `teleporter(x, z)`, `acheter(id)`,
 `equiper(id)`, `recharger()`, `boutique()`, et pour l'hôte `crediter(n, id)`,
-`illuminer()`, `finirChrono()` (le boss arrive), `blesser(id, degats)`,
+`illuminer()`, `passerPreparation()`, `finirChrono()` (le boss arrive),
+`blesser(id, degats)`,
 `poserEtoile(x, z)`, `ameliorerLanterne()` et
 `poserZombie(type, x, z, vitesse, pv)` (immobile par défaut : pratique pour
 photographier un modèle). `etat()` donne aussi `vie`, `vies`, `etoiles`,
@@ -162,6 +177,19 @@ photographier un modèle). `etat()` donne aussi `vie`, `vies`, `etoiles`,
   `RoomEnvironment` ; en jeu, le métal garde une faible `metalness` et une
   lumière d'appoint accrochée à la caméra éclaire l'arme en main la nuit.
 - La barre d'armes est à gauche : à droite, elle recouvrait l'arme en main.
+- **Relief à étages** : une carte est une carte de hauteurs (blocs, rampes).
+  Joueurs et zombies ne montent pas une marche de plus de 0,55 m (joueur) ou
+  `PAS_MAX` (zombie, navigation) : c'est ce qui fait des murailles des murs.
+  On peut sauter en bas. Tout ce qui se touche (attaque, poteau porté,
+  étoile) vérifie aussi l'écart de hauteur, sinon on frappe à travers la
+  terrasse.
+- Navigation : les distances de Dijkstra doivent rester en 64 bits. En
+  `Float32Array`, une distance arrondie ne se reconnaît plus en sortant de la
+  file (`d > dist[b]`) et presque toute la carte devenait injoignable.
+- Changer de carte ne change pas le nombre de lumières : les lampes des
+  décors sont sorties de leur groupe (`scene.attach`) et éteintes quand leur
+  décor est caché. Un groupe invisible retire ses lumières du compte, et tous
+  les shaders se recompilent.
 - Une lumière placée à l'intérieur d'un maillage n'éclaire que ce qui
   l'entoure : le halo du boss est devant son torse, sinon il restait noir.
 - La nuit est un brouillard presque noir (22 m au départ, repoussé par la

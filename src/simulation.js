@@ -48,7 +48,8 @@ function etatInitial() {
 // Plafond de dégâts par coup reçu du réseau : une grenade au centre.
 const DEGATS_MAX = Math.max(...ARMES.map((a) => a.degats * 2));
 
-export function creerSimulation({ aleatoire = Math.random } = {}) {
+// apparitionBoss : secondes de manche avant le boss (BOSS.apparition par défaut).
+export function creerSimulation({ aleatoire = Math.random, apparitionBoss = BOSS.apparition } = {}) {
   let s = etatInitial();
   let membres = [];
   let roleSolo = 'defenseur';
@@ -323,10 +324,11 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
           s.phase = 'defaite';
           s.reste = DUREE_DEFAITE;
           s.poteau.porteur = null;
-        } else if (s.reste <= 0) {
-          // Fin du chrono : le boss sort de la mer ; sa mort gagne la manche.
-          if (!s.boss) appelerBoss();
-          else if (!bossEnJeu()) gagnerManche();
+        } else if (!s.boss && DUREE_MANCHE - s.reste >= apparitionBoss) {
+          // L'heure du boss : il sort de la mer ; sa mort gagne la manche.
+          appelerBoss();
+        } else if (s.boss && !bossEnJeu()) {
+          gagnerManche();
         }
       } else if (s.phase === 'pause') {
         s.reste -= dt;

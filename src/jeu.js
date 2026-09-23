@@ -930,6 +930,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           illumination: monde.illumination, recharge: monde.recharge, monId, hote: estHote(), role: role(),
           zombies: monstres.cibles().map((c) => [c.x, c.y, c.z]),
           types: monde.monstres.map((m) => TYPES_ZOMBIES[m.k ?? 0].id),
+          ids: monde.monstres.map((m) => m.id),
           munitions: { ...munitions },
           rechargement: rechargement ? rechargement.id : null,
           progression: rechargement ? (horloge - rechargement.debut) / rechargement.duree : null,

@@ -122,13 +122,16 @@ export function poidsTypes(manche, ecoule) {
   ];
 }
 
-// Le boss de fin de manche. Quand le chrono tombe à zéro, il sort de la mer :
-// la manche n'est gagnée qu'à sa mort. Pendant le combat, les zombies
+// Le boss de fin de manche. Au bout de apparition secondes de manche, il
+// sort de la mer : la manche n'est gagnée qu'à sa mort (le chrono, lui,
+// continue jusqu'à zéro puis s'arrête). Pendant le combat, les zombies
 // continuent d'arriver (apparitions : part de la cadence de début de manche)
 // et il appelle des coureurs en renfort toutes les invocation secondes. Sous
 // la moitié de sa vie (enrage), il accélère.
 export const BOSS = {
   nom: 'Le Roi Noyé',
+  // Réglage de test : 60 s. En jeu normal : DUREE_MANCHE (fin du chrono).
+  apparition: 60,
   pv: 1500, parManche: 0.6, parDefenseur: 0.8,
   apparitions: 0.5,
   invocation: 12, premiereInvocation: 8, renforts: 3,

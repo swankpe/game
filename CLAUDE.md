@@ -51,8 +51,9 @@ l'explosion dans `ex` pendant 1,5 s avec un numéro. Chaque navigateur la
 montre une fois (`explosionsVues` dans `jeu.js`).
 
 Le boss est un zombie comme les autres (type `boss`, jamais tiré au sort),
-avec en plus `s.boss` dans la simulation. Chrono à zéro : l'hôte le fait
-apparaître ; la manche n'est gagnée que lorsqu'il a disparu de la liste. Ses
+avec en plus `s.boss` dans la simulation. Après `BOSS.apparition` secondes
+de manche (la fin du chrono en jeu normal, 60 s pendant les essais), l'hôte
+le fait apparaître ; la manche n'est gagnée que lorsqu'il a disparu de la liste. Ses
 cris (renforts) sont un compteur dans `bo` : chaque navigateur rugit quand il
 augmente ; la rage se déduit de ses points de vie. Barre de vie, musique et
 annonces se déduisent donc de l'instantané, sans message à part.
@@ -107,8 +108,8 @@ Supabase.
 
 Le jeu lui-même ne se vérifie qu'avec Playwright, dans Chromium lancé avec
 `--use-angle=swiftshader --enable-unsafe-swiftshader`. Ouvrir l'adresse avec
-`?debug` expose `window.leProtege` : `etat()` (munitions et `progression` du
-rechargement comprises), `viser(x, y, z)`, `teleporter(x, z)`, `acheter(id)`,
+`?debug` expose `window.leProtege` : `etat()` (munitions, `progression` du
+rechargement, `ids` des zombies et `boss` compris), `viser(x, y, z)`, `teleporter(x, z)`, `acheter(id)`,
 `equiper(id)`, `recharger()`, `boutique()`, et pour l'hôte `crediter(n, id)`,
 `illuminer()`, `finirChrono()` (le boss arrive), `blesser(id, degats)` et
 `poserZombie(type, x, z, vitesse, pv)` (immobile par défaut : pratique pour

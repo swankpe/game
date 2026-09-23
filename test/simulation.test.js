@@ -17,7 +17,9 @@ const membres = (...ids) => ids.map((id) => ({ id }));
 const joueurs = (entrees = {}) => new Map(Object.entries(entrees));
 
 function lancer(ids = ['a', 'b', 'c', 'd'], options) {
-  const sim = creerSimulation({ aleatoire: graine(42) });
+  // Le boss à la fin du chrono, comme en jeu normal (BOSS.apparition peut
+  // être avancé pour les essais).
+  const sim = creerSimulation({ aleatoire: graine(42), apparitionBoss: DUREE_MANCHE });
   sim.definirMembres(membres(...ids), options);
   assert.ok(sim.demarrer());
   return sim;
@@ -213,7 +215,7 @@ test("un nouvel hôte reprend exactement là où l'ancien s'est arrêté", () =>
   const ancien = lancer();
   avancer(ancien, 20);
   const inst = JSON.parse(JSON.stringify(ancien.instantane()));
-  const nouveau = creerSimulation({ aleatoire: graine(7) });
+  const nouveau = creerSimulation({ aleatoire: graine(7), apparitionBoss: DUREE_MANCHE });
   assert.ok(nouveau.charger(inst));
   assert.deepEqual(nouveau.instantane(), ancien.instantane());
   // Les identifiants continuent sans collision.
@@ -551,4 +553,19 @@ test('un nouvel hôte reprend le combat contre le boss', () => {
   assert.equal(normaliserMonde({ ph: 'manche', bo: [1, -5, 0] }).boss, null);
   assert.equal(normaliserMonde({ ph: 'manche', bo: 'x' }).boss, null);
   assert.equal(normaliserMonde({ ph: 'manche' }).boss, null);
+});
+
+test('le boss peut arriver plus tôt : sa chute gagne la manche sans attendre le chrono', () => {
+  const sim = creerSimulation({ aleatoire: graine(3), apparitionBoss: 60 });
+  sim.definirMembres(membres('a'));
+  assert.ok(sim.demarrer());
+  const s = sim.etat;
+  for (let t = 0; t < 59; t += 0.1) avancerDefendu(sim, 0.1);
+  assert.equal(s.boss, null, 'pas avant la première minute');
+  const boss = jusquAuBoss(sim);
+  assert.ok(Math.abs(s.reste - (DUREE_MANCHE - 60)) < 0.2, `chrono à ${s.reste.toFixed(1)} s`);
+  while (!sim.toucher(boss.id, 150, 'a'));
+  sim.pas(0.1, joueurs());
+  assert.equal(s.phase, 'pause');
+  assert.equal(s.manche, 2);
 });

@@ -11,49 +11,121 @@ export const MULTIPLICATEUR_TETE = 2;
 
 // Les armes, dans l'ordre des touches 1 à 4. degats : par balle (par
 // explosion pour le lance-grenades, au centre) ; cadence : secondes entre deux
-// tirs ; dispersion : écart maximal du tir, en radians ; recul : à-coup du
-// regard vers le haut. Munitions illimitées.
+// tirs ; dispersion : écart maximal du tir au repos, en radians ; chargeur et
+// rechargement (secondes) : les munitions sont illimitées, pas le chargeur.
+//
+// Recul, à chaque tir : le regard monte de recul (radians) et s'écarte au
+// hasard de reculLateral ; il revient de lui-même au rythme retour (par
+// seconde). En rafale, le recul s'accumule : l'Uzi et le fusil grimpent, il
+// faut tirer la souris vers le bas. evasement : dispersion ajoutée par tir,
+// plafonnée à evasementMax, qui se résorbe au même rythme.
 export const ARMES = [
   {
     id: 'pistolet', nom: 'Pistolet', prix: 0,
-    degats: 10, cadence: 0.28, dispersion: 0.004, portee: 60, recul: 0.012,
+    degats: 10, cadence: 0.28, dispersion: 0.004, portee: 60,
+    chargeur: 12, rechargement: 1.2,
+    recul: 0.035, reculLateral: 0.008, retour: 7, evasement: 0.004, evasementMax: 0.012,
     description: 'Fidèle et précis. Trois balles pour un zombie, deux dans la tête.',
   },
   {
     id: 'uzi', nom: 'Mini Uzi', prix: 250,
-    degats: 7, cadence: 0.07, dispersion: 0.03, portee: 40, recul: 0.005,
-    description: 'Compact et nerveux : une pluie de balles, mais qui s’écarte de loin.',
+    degats: 7, cadence: 0.07, dispersion: 0.02, portee: 40,
+    chargeur: 32, rechargement: 1.6,
+    recul: 0.012, reculLateral: 0.014, retour: 5, evasement: 0.003, evasementMax: 0.035,
+    description: 'Compact et nerveux : une pluie de balles, mais qui s’écarte et grimpe en rafale.',
   },
   {
     id: 'fusil', nom: 'Fusil d’assaut', prix: 600,
-    degats: 16, cadence: 0.11, dispersion: 0.01, portee: 70, recul: 0.009,
-    description: 'Puissant, précis, rapide : l’arme pour tenir la ligne.',
+    degats: 16, cadence: 0.11, dispersion: 0.006, portee: 70,
+    chargeur: 30, rechargement: 2,
+    recul: 0.02, reculLateral: 0.009, retour: 5, evasement: 0.002, evasementMax: 0.02,
+    description: 'Puissant et précis au coup par coup ; en rafale, il faut tenir le recul.',
   },
   {
     id: 'lance', nom: 'Lance-grenades', prix: 1200,
-    degats: 90, cadence: 0.85, dispersion: 0.005, portee: 80, recul: 0.03,
+    degats: 90, cadence: 0.85, dispersion: 0.005, portee: 80,
+    chargeur: 6, rechargement: 2.8,
+    recul: 0.09, reculLateral: 0.015, retour: 4, evasement: 0, evasementMax: 0,
     projectile: true, vitesse: 24, rayon: 4.5,
-    description: 'La grenade explose au contact et balaie tout un groupe.',
+    description: 'Six grenades dans le barillet : chacune explose au contact et balaie un groupe.',
   },
 ];
+
+// Dispersion ajoutée par mètre par seconde de déplacement : en courant
+// (7,5 m/s), le tir s'écarte de 0,012 rad de plus.
+export const DISPERSION_MOUVEMENT = 0.0016;
+// En l'air, on tire au jugé.
+export const DISPERSION_SAUT = 0.015;
 
 export const indiceArme = (id) => ARMES.findIndex((a) => a.id === id);
 // Armes possédées : un bit par arme, le pistolet (bit 0) toujours présent.
 export const ARMES_DEPART = 1;
 
-export const RECOMPENSE_ZOMBIE = 10;
 export const BONUS_MANCHE = 150;
 export const DISTANCE_BOUTIQUE = 3.2;
 
 export const DUREE_ILLUMINATION = 30;
 export const RECHARGE_ILLUMINATION = 180;
 
-// Un zombie au contact retire DEGATS_MONSTRE points par seconde.
+// Un zombie au contact retire DEGATS_MONSTRE points par seconde (multiplié
+// par les degats de son type).
 export const PORTEE_ATTAQUE = 1.1;
 export const DEGATS_MONSTRE = 6;
 export const MONSTRES_MAX = 60;
-// Une part des zombies court : ils arrivent en premier.
-export const PART_COUREURS = 0.18;
+
+// Les types de zombies, dans l'ordre de leur indice k (instantanés). pv,
+// vitesse et degats multiplient les valeurs de la manche ; largeur et hauteur,
+// la silhouette (et donc la zone à toucher) ; recompense : argent du tueur.
+// max : nombre de ce type en même temps sur l'île.
+export const TYPES_ZOMBIES = [
+  {
+    id: 'rodeur', nom: 'Rôdeur', pv: 1, vitesse: 1, degats: 1, largeur: 1, hauteur: 1, recompense: 10,
+    alerte: '',
+  },
+  {
+    id: 'coureur', nom: 'Coureur', pv: 0.6, vitesse: 1.6, degats: 0.7, largeur: 0.9, hauteur: 0.95, recompense: 15,
+    alerte: 'Coureurs : rapides mais fragiles.',
+  },
+  {
+    id: 'colosse', nom: 'Colosse', pv: 6, vitesse: 0.6, degats: 2.5, largeur: 1.5, hauteur: 1.45, recompense: 60, max: 4,
+    alerte: 'Un colosse ! Lent, mais il encaisse : visez la tête.',
+  },
+  {
+    id: 'bouffi', nom: 'Bouffi', pv: 1.5, vitesse: 0.85, degats: 0, largeur: 1.4, hauteur: 0.95, recompense: 25, explosif: true,
+    alerte: 'Un bouffi ! Il explose : abattez-le loin du poteau.',
+  },
+];
+export const indiceType = (id) => TYPES_ZOMBIES.findIndex((t) => t.id === id);
+
+// Le bouffi explose au contact du poteau ou quand on l'abat : il blesse le
+// protégé (s'il est à portée) et les zombies autour, avec un bonus au tireur
+// pour chaque zombie emporté.
+export const EXPLOSION_BOUFFI = { rayon: 3.5, degats: 80, protege: 25 };
+
+// Part de chaque type parmi les apparitions (poids relatifs, dans l'ordre de
+// TYPES_ZOMBIES). Les colosses attendent la deuxième minute de la première
+// manche ; les types spéciaux gagnent du terrain de manche en manche.
+export function poidsTypes(manche, ecoule) {
+  const avance = ecoule / DUREE_MANCHE;
+  const m = manche - 1;
+  return [
+    1,
+    0.22 + 0.05 * m,
+    manche === 1 && ecoule < 60 ? 0 : 0.03 + 0.025 * m + 0.03 * avance,
+    0.06 + 0.03 * m + 0.03 * avance,
+  ];
+}
+
+// Tirage d'un type selon les poids (tirage : nombre entre 0 et 1).
+export function tirerType(poids, tirage) {
+  const total = poids.reduce((a, b) => a + b, 0);
+  let seuil = tirage * total;
+  for (const [k, p] of poids.entries()) {
+    if (seuil < p) return k;
+    seuil -= p;
+  }
+  return 0;
+}
 
 export const DISTANCE_PORTER = 2.5;
 // Le poteau porté est devant, un peu à droite : il ne bouche pas la vue.
@@ -90,10 +162,11 @@ export function pvMonstre(manche) {
   return Math.round(PV_MONSTRE * (1 + 0.15 * (manche - 1)));
 }
 
-// Dégâts d'une grenade selon la distance au point d'impact (40 % au bord).
-export function degatsExplosion(arme, distance) {
-  if (distance > arme.rayon) return 0;
-  return Math.round(arme.degats * (1 - 0.6 * (distance / arme.rayon)));
+// Dégâts d'une explosion selon la distance au centre (40 % au bord).
+// source : { degats, rayon } (une arme, ou EXPLOSION_BOUFFI).
+export function degatsExplosion(source, distance, degats = source.degats) {
+  if (distance > source.rayon) return 0;
+  return Math.round(degats * (1 - 0.6 * (distance / source.rayon)));
 }
 
 // En solo, le joueur choisit son rôle ; sinon tirage au sort, en évitant de
@@ -105,30 +178,35 @@ export function tirerProtege(membres, { aleatoire = Math.random, roleSolo = 'def
   return candidats[Math.floor(aleatoire() * candidats.length) % candidats.length].id;
 }
 
-// Premier zombie traversé par un tir. cibles : [{ id, x, y, z }], y aux pieds.
+// Premier zombie traversé par un tir. cibles : [{ id, x, y, z, l, h }], y aux
+// pieds ; l et h (1 par défaut) agrandissent le cylindre d'un gros zombie.
 export function premierTouche(origine, direction, cibles, portee = 80) {
   const [ox, oy, oz] = origine;
   const [dx, dy, dz] = direction;
   const horizontal = dx * dx + dz * dz;
   let meilleur = null;
   for (const c of cibles) {
+    const rayon = RAYON_MONSTRE * (c.l ?? 1);
+    const haut = HAUTEUR_MONSTRE * (c.h ?? 1);
     let t;
     if (horizontal < 1e-9) {
       // Tir vertical : touché seulement si l'on est dans le cylindre.
-      if (Math.hypot(c.x - ox, c.z - oz) > RAYON_MONSTRE) continue;
-      t = dy > 0 ? c.y - oy : oy - (c.y + HAUTEUR_MONSTRE);
+      if (Math.hypot(c.x - ox, c.z - oz) > rayon) continue;
+      t = dy > 0 ? c.y - oy : oy - (c.y + haut);
       if (t < 0) continue;
     } else {
       const tProche = ((c.x - ox) * dx + (c.z - oz) * dz) / horizontal;
       const px = ox + dx * tProche - c.x, pz = oz + dz * tProche - c.z;
       const d2 = px * px + pz * pz;
-      if (d2 > RAYON_MONSTRE * RAYON_MONSTRE) continue;
-      t = tProche - Math.sqrt((RAYON_MONSTRE * RAYON_MONSTRE - d2) / horizontal);
+      if (d2 > rayon * rayon) continue;
+      t = tProche - Math.sqrt((rayon * rayon - d2) / horizontal);
     }
     if (t < 0 || t > portee) continue;
     const hauteur = oy + dy * t - c.y;
-    if (hauteur < 0 || hauteur > HAUTEUR_MONSTRE) continue;
-    if (!meilleur || t < meilleur.distance) meilleur = { id: c.id, distance: t, tete: hauteur >= HAUTEUR_TETE };
+    if (hauteur < 0 || hauteur > haut) continue;
+    if (!meilleur || t < meilleur.distance) {
+      meilleur = { id: c.id, distance: t, tete: hauteur >= HAUTEUR_TETE * (c.h ?? 1) };
+    }
   }
   return meilleur;
 }

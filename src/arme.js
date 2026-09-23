@@ -1,5 +1,5 @@
-// L'arme vue à la première personne et les effets de tir : recul, éclair de
-// bouche, traînées de balles, explosions. Le nombre de lumières reste fixe
+// L'arme vue à la première personne et les effets de tir : recul,
+// rechargement, éclair de bouche, traînées de balles, explosions. Le nombre de lumières reste fixe
 // (réserves d'éclairs et d'explosions) : en ajouter ou en retirer forcerait
 // Three.js à recompiler tous les shaders, d'où une saccade à chaque tir.
 
@@ -14,6 +14,19 @@ const DUREE_ECLAIR = 0.06;
 const DUREE_TRAINEE = 0.07;
 const DUREE_EXPLOSION = 0.9;
 const DUREE_BASCULE = 0.16;
+// Descente du chargeur pendant le rechargement (mètres, repère du modèle).
+const CHUTE_CHARGEUR = 0.28;
+
+const lisse = (a, b, x) => {
+  const t = Math.min(Math.max((x - a) / (b - a), 0), 1);
+  return t * t * (3 - 2 * t);
+};
+
+// Explosions : orange pour une grenade, vert acide pour un bouffi qui éclate.
+const TEINTES = {
+  grenade: { teinte: 0.09, lumiere: '#ffa14a', eclats: '#2a2522' },
+  bouffi: { teinte: 0.24, lumiere: '#b6ff5a', eclats: '#6f9a2c' },
+};
 
 // Place de chaque arme dans le champ de vision (repère caméra) et force du
 // recul visuel.
@@ -74,7 +87,8 @@ export function creerArme(scene, camera) {
       if (o.isMesh) o.castShadow = false;
     });
     camera.add(groupe);
-    vues[id] = { groupe, modele, flamme, repos: new THREE.Vector3(...CADRAGE[id].position) };
+    const { chargeur } = modele.userData;
+    vues[id] = { groupe, modele, flamme, chargeur, repos: new THREE.Vector3(...CADRAGE[id].position), chargeurRepos: chargeur.position.clone() };
   }
 
   // Petite lumière d'appoint : on voit son arme même en pleine nuit.
@@ -131,6 +145,18 @@ export function creerArme(scene, camera) {
   let flammeReste = 0;
   let balancement = 0;
   let visible = false;
+  // Rechargement en cours : { t, duree } (secondes), ou null.
+  let recharge = null;
+
+  function annulerRecharge() {
+    recharge = null;
+    for (const v of Object.values(vues)) {
+      if (v.modele.userData.barillet) continue;
+      v.chargeur.position.copy(v.chargeurRepos);
+      v.chargeur.rotation.set(0, 0, 0);
+      v.chargeur.visible = true;
+    }
+  }
   vues.pistolet.groupe.visible = true;
   const tampon = new THREE.Vector3();
 
@@ -143,8 +169,15 @@ export function creerArme(scene, camera) {
       visible = oui;
     },
     equiper(id) {
-      if (vues[id]) voulue = id;
+      if (!vues[id]) return;
+      if (id !== voulue) annulerRecharge();
+      voulue = id;
     },
+    // Animation seule : c'est jeu.js qui compte les balles et la durée.
+    recharger(duree) {
+      recharge = { t: 0, duree };
+    },
+    annulerRecharge,
     // Vrai quand l'arme voulue est en main (pas pendant le changement).
     prete() {
       return affichee === voulue && abaisse < 0.2;
@@ -153,6 +186,8 @@ export function creerArme(scene, camera) {
     tirer() {
       const v = vues[affichee];
       recul = Math.min(recul + CADRAGE[affichee].recul, 1.6);
+      // Le barillet tourne d'une chambre à chaque coup.
+      v.cran = (v.cran ?? 0) + Math.PI / 3;
       flammeReste = 0.05;
       v.flamme.rotation.z = Math.random() * Math.PI;
       v.modele.updateWorldMatrix(true, false);
@@ -174,11 +209,15 @@ export function creerArme(scene, camera) {
       pos.needsUpdate = true;
       t.reste = DUREE_TRAINEE;
     },
-    explosion(position, rayon) {
+    explosion(position, rayon, genre = 'grenade') {
       const e = explosions[prochaineExplosion];
       prochaineExplosion = (prochaineExplosion + 1) % NB_EXPLOSIONS;
+      const t = TEINTES[genre] ?? TEINTES.grenade;
       e.t = 0;
       e.rayon = rayon;
+      e.teinte = t.teinte;
+      e.lumiere.color.set(t.lumiere);
+      for (const eclat of e.eclats) eclat.material.color.set(t.eclats);
       for (const o of [e.boule, e.fumee, e.lumiere]) o.position.copy(position);
       e.fumee.position.y += 0.4;
       for (const eclat of e.eclats) {
@@ -206,12 +245,39 @@ export function creerArme(scene, camera) {
       balancement += dt * (4 + marche * 1.6);
       const ampleur = Math.min(marche / 6, 1);
       const v = vues[affichee];
+      // Rechargement : l'arme bascule sur le côté, le chargeur tombe, un
+      // nouveau remonte, l'arme revient. Le barillet, lui, tourne.
+      let bascule = 0;
+      let tour = 0;
+      if (recharge && affichee === voulue) {
+        recharge.t += dt;
+        const f = recharge.t / recharge.duree;
+        bascule = lisse(0, 0.15, f) * (1 - lisse(0.85, 1, f));
+        if (v.modele.userData.barillet) {
+          tour = lisse(0.15, 0.85, f) * Math.PI * 2;
+        } else {
+          const sortie = lisse(0.15, 0.4, f) * (1 - lisse(0.5, 0.75, f));
+          v.chargeur.position.set(v.chargeurRepos.x, v.chargeurRepos.y - sortie * CHUTE_CHARGEUR, v.chargeurRepos.z - sortie * 0.05);
+          v.chargeur.rotation.x = sortie * 0.25;
+          // Entre la chute et la remontée : aucun chargeur dans l'arme.
+          v.chargeur.visible = f < 0.4 || f > 0.5;
+        }
+        if (f >= 1) annulerRecharge();
+      }
+      if (v.modele.userData.barillet) {
+        v.cranVu = (v.cranVu ?? 0) + ((v.cran ?? 0) - (v.cranVu ?? 0)) * (1 - Math.exp(-dt * 25));
+        v.chargeur.rotation.z = -(v.cranVu + tour);
+      }
+      // Pendant le rechargement, l'arme roule sur la droite (le puits du
+      // chargeur se tourne vers la main gauche) sans lever le canon : relevé,
+      // un fusil traverserait tout l'écran.
       v.groupe.position.set(
-        v.repos.x + Math.sin(balancement) * 0.012 * ampleur,
-        v.repos.y + Math.abs(Math.cos(balancement)) * 0.014 * ampleur - abaisse * 0.25,
+        v.repos.x + Math.sin(balancement) * 0.012 * ampleur - bascule * 0.02,
+        v.repos.y + Math.abs(Math.cos(balancement)) * 0.014 * ampleur - abaisse * 0.25 - bascule * 0.06,
         v.repos.z + recul * 0.05,
       );
-      v.groupe.rotation.x = recul * 0.16 - abaisse * 0.7;
+      v.groupe.rotation.x = recul * 0.16 - abaisse * 0.7 + bascule * 0.06;
+      v.groupe.rotation.z = -bascule * 0.5;
       flammeReste -= dt;
       v.flamme.visible = flammeReste > 0;
 
@@ -237,7 +303,7 @@ export function creerArme(scene, camera) {
         const r = e.rayon * (0.25 + 0.75 * Math.sqrt(Math.min(f * 3, 1)));
         e.boule.scale.setScalar(r * 0.8);
         e.boule.material.opacity = Math.max(0, 0.9 - f * 2.2);
-        e.boule.material.color.setHSL(0.09 - f * 0.06, 1, 0.65 - f * 0.3);
+        e.boule.material.color.setHSL(e.teinte - f * 0.06, 1, 0.65 - f * 0.3);
         e.fumee.scale.setScalar(r * (0.6 + f * 0.6));
         e.fumee.position.y += dt * 0.8;
         e.fumee.material.opacity = Math.sin(Math.min(f * 1.2, 1) * Math.PI) * 0.55;

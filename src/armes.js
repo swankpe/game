@@ -4,9 +4,10 @@
 // de visée phosphorescents, culots en laiton) font le reste.
 //
 // Repère commun : canon vers +z, haut vers +y, en mètres. Chaque modèle donne
-// dans userData la bouche du canon, la poignée (main droite) et la garde
-// (main gauche). Une instance a ses propres matières : on peut la jeter sans
-// toucher aux autres.
+// dans userData la bouche du canon, la poignée (main droite), la garde (main
+// gauche) et le chargeur : un groupe qu'on peut sortir de l'arme pendant le
+// rechargement (le barillet du lance-grenades, lui, tourne). Une instance a
+// ses propres matières : on peut la jeter sans toucher aux autres.
 
 import * as THREE from 'three';
 
@@ -88,11 +89,20 @@ function pontet(z0, z1, y0, y1, epaisseur, mat, bord = 0.007) {
   );
 }
 
-function finaliser(groupe, { bouche, poignee, garde }) {
+// Groupe du chargeur, accroché à l'arme.
+function chargeurDe(groupe) {
+  const c = new THREE.Group();
+  groupe.add(c);
+  return c;
+}
+
+function finaliser(groupe, { bouche, poignee, garde, chargeur, barillet = false }) {
   groupe.userData = {
     bouche: new THREE.Vector3(...bouche),
     poignee: new THREE.Vector3(...poignee),
     garde: garde ? new THREE.Vector3(...garde) : null,
+    chargeur,
+    barillet,
   };
   return groupe;
 }
@@ -110,7 +120,11 @@ function creerPistolet() {
   g.add(profil([[-0.09, 0.001], [0.1, 0.001], [0.1, -0.014], [0.092, -0.022], [-0.06, -0.022], [-0.09, -0.012]], 0.028, m.noir));
   g.add(profil([[-0.1, -0.004], [-0.035, -0.018], [-0.048, -0.128], [-0.056, -0.138], [-0.098, -0.138], [-0.104, -0.13], [-0.102, -0.03]], 0.031, m.noir));
   for (const y of [-0.05, -0.075, -0.1]) g.add(boite(0.0335, 0.006, 0.046, m.caoutchouc, [0, y, -0.068 + y * 0.12], [0.12, 0, 0]));
-  g.add(boite(0.027, 0.008, 0.05, m.acierClair, [0, -0.141, -0.077], [0.12, 0, 0]));
+  // Chargeur : la semelle dépasse de la poignée, le corps est caché dedans.
+  const chargeur = chargeurDe(g);
+  chargeur.add(boite(0.027, 0.008, 0.05, m.acierClair, [0, -0.141, -0.077], [0.12, 0, 0]));
+  chargeur.add(boite(0.022, 0.118, 0.04, m.acier, [0, -0.08, -0.07], [0.12, 0, 0]));
+  chargeur.add(boite(0.008, 0.008, 0.024, m.laiton, [0, -0.018, -0.063], [0.12, 0, 0]));
   g.add(pontet(-0.032, 0.036, -0.02, -0.058, 0.012, m.noir));
   g.add(boite(0.006, 0.022, 0.008, m.acier, [0, -0.036, 0.002], [0.3, 0, 0]));
   g.add(boite(0.003, 0.004, 0.022, m.acier, [0.0162, 0.004, 0.0]));
@@ -122,7 +136,7 @@ function creerPistolet() {
   }
   g.add(boite(0.006, 0.011, 0.008, m.noir, [0, 0.051, 0.098]));
   g.add(bille(0.0022, m.lueur, [0, 0.054, 0.1025]));
-  return finaliser(g, { bouche: [0, 0.024, 0.122], poignee: [0, -0.07, -0.072], garde: [0.022, -0.088, -0.058] });
+  return finaliser(g, { bouche: [0, 0.024, 0.122], poignee: [0, -0.07, -0.072], garde: [0.022, -0.088, -0.058], chargeur });
 }
 
 function creerUzi() {
@@ -149,15 +163,18 @@ function creerUzi() {
   g.add(boite(0.0425, 0.1, 0.04, m.caoutchouc, [0, -0.072, -0.012], [0.04, 0, 0]));
   for (let y = -0.04; y > -0.12; y -= 0.02) g.add(boite(0.0445, 0.004, 0.036, m.noir, [0, y, -0.012], [0.04, 0, 0]));
   g.add(boite(0.02, 0.05, 0.008, m.acierClair, [0, -0.035, -0.041]));
-  g.add(boite(0.028, 0.07, 0.034, m.acier, [0, -0.172, -0.012]));
-  g.add(boite(0.034, 0.01, 0.042, m.noir, [0, -0.21, -0.012]));
+  const chargeur = chargeurDe(g);
+  chargeur.add(boite(0.028, 0.07, 0.034, m.acier, [0, -0.172, -0.012]));
+  chargeur.add(boite(0.034, 0.01, 0.042, m.noir, [0, -0.21, -0.012]));
+  chargeur.add(boite(0.024, 0.12, 0.03, m.acier, [0, -0.08, -0.012]));
+  chargeur.add(boite(0.008, 0.008, 0.02, m.laiton, [0, -0.016, -0.008]));
   g.add(pontet(0.022, 0.078, 0.001, -0.046, 0.012, m.noir));
   g.add(boite(0.005, 0.02, 0.007, m.acierClair, [0, -0.02, 0.04], [0.3, 0, 0]));
   // Crosse métallique repliée le long du flanc gauche.
   g.add(boite(0.05, 0.034, 0.02, m.acier, [0, 0.026, -0.13]));
   for (const y of [0.012, 0.048]) g.add(tube(0.0038, 0.225, m.acierClair, [0.028, y, -0.02]));
   g.add(boite(0.012, 0.052, 0.012, m.caoutchouc, [0.028, 0.03, 0.094]));
-  return finaliser(g, { bouche: [0, 0.03, 0.205], poignee: [0, -0.062, -0.01], garde: [0.012, -0.014, 0.088] });
+  return finaliser(g, { bouche: [0, 0.03, 0.205], poignee: [0, -0.062, -0.01], garde: [0.012, -0.014, 0.088], chargeur });
 }
 
 function creerFusil() {
@@ -179,11 +196,12 @@ function creerFusil() {
   g.add(pontet(-0.02, 0.05, 0.001, -0.045, 0.01, m.acier));
   g.add(boite(0.005, 0.022, 0.007, m.acierClair, [0, -0.02, 0.015], [0.3, 0, 0]));
   // Chargeur « banane » en bakélite, segment par segment.
+  const chargeur = chargeurDe(g);
   let cz = 0.068, cy = -0.012;
   for (let k = 0; k < 6; k++) {
     const t = 0.12 + k * 0.075;
-    g.add(boite(0.028, 0.036, 0.066, m.bakelite, [0, cy, cz], [-t, 0, 0]));
-    g.add(boite(0.0295, 0.004, 0.068, m.boisFonce, [0, cy - 0.018 * Math.cos(t), cz + 0.018 * Math.sin(t)], [-t, 0, 0]));
+    chargeur.add(boite(0.028, 0.036, 0.066, m.bakelite, [0, cy, cz], [-t, 0, 0]));
+    chargeur.add(boite(0.0295, 0.004, 0.068, m.boisFonce, [0, cy - 0.018 * Math.cos(t), cz + 0.018 * Math.sin(t)], [-t, 0, 0]));
     cz += Math.sin(t + 0.037) * 0.034;
     cy -= Math.cos(t + 0.037) * 0.034;
   }
@@ -203,23 +221,25 @@ function creerFusil() {
   for (const z of [0.617, 0.632]) g.add(boite(0.034, 0.005, 0.009, m.trou, [0, 0.04, z]));
   g.add(tube(0.006, 0.01, m.trou, [0, 0.03, 0.648]));
   g.add(tube(0.004, 0.24, m.acierClair, [0, 0.008, 0.49]));
-  return finaliser(g, { bouche: [0, 0.03, 0.652], poignee: [0, -0.058, -0.055], garde: [0, -0.008, 0.27] });
+  return finaliser(g, { bouche: [0, 0.03, 0.652], poignee: [0, -0.058, -0.055], garde: [0, -0.008, 0.27], chargeur });
 }
 
 function creerLanceGrenades() {
   const m = matieres();
   const g = new THREE.Group();
-  // Barillet à six chambres, cannelures et culots en laiton.
-  g.add(tube(0.075, 0.15, m.noir, [0, 0, 0.02], 12));
+  // Barillet à six chambres, cannelures et culots en laiton : il tourne sur
+  // son axe (z) pendant le rechargement.
+  const barillet = chargeurDe(g);
+  barillet.add(tube(0.075, 0.15, m.noir, [0, 0, 0.02], 12));
   g.add(tube(0.016, 0.17, m.acierClair, [0, 0, 0.02]));
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-    g.add(boite(0.016, 0.012, 0.13, m.acierClair, [Math.sin(a) * 0.074, Math.cos(a) * 0.074, 0.02], [0, 0, -a]));
+    barillet.add(boite(0.016, 0.012, 0.13, m.acierClair, [Math.sin(a) * 0.074, Math.cos(a) * 0.074, 0.02], [0, 0, -a]));
     const b = (i / 6) * Math.PI * 2;
     const x = Math.sin(b) * 0.046, y = Math.cos(b) * 0.046;
-    g.add(tube(0.02, 0.006, m.laiton, [x, y, -0.057], 10));
-    g.add(tube(0.006, 0.008, m.acierClair, [x, y, -0.059], 6));
-    g.add(tube(0.02, 0.004, m.oliveFonce, [x, y, 0.096], 10));
+    barillet.add(tube(0.02, 0.006, m.laiton, [x, y, -0.057], 10));
+    barillet.add(tube(0.006, 0.008, m.acierClair, [x, y, -0.059], 6));
+    barillet.add(tube(0.02, 0.004, m.oliveFonce, [x, y, 0.096], 10));
   }
   // Carcasse : flasques, sangles, rail et viseur à point rouge.
   g.add(profil([[-0.135, -0.075], [-0.07, -0.075], [-0.07, 0.1], [-0.135, 0.085]], 0.05, m.acier));
@@ -250,7 +270,7 @@ function creerLanceGrenades() {
   g.add(tube(0.01, 0.23, m.acierClair, [0, -0.02, -0.25]));
   g.add(profil([[-0.4, 0.09], [-0.37, 0.09], [-0.37, -0.075], [-0.4, -0.085]], 0.046, m.noir));
   g.add(boite(0.048, 0.17, 0.014, m.caoutchouc, [0, 0.003, -0.405]));
-  return finaliser(g, { bouche: [0, 0.05, 0.445], poignee: [0, -0.125, -0.085], garde: [0, -0.05, 0.3] });
+  return finaliser(g, { bouche: [0, 0.05, 0.445], poignee: [0, -0.125, -0.085], garde: [0, -0.05, 0.3], chargeur: barillet, barillet: true });
 }
 
 const CONSTRUCTEURS = { pistolet: creerPistolet, uzi: creerUzi, fusil: creerFusil, lance: creerLanceGrenades };

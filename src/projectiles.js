@@ -27,7 +27,8 @@ export function creerProjectiles(scene) {
       actifs.push({ modele, v: vitesse.clone(), t: 0, locale });
     },
 
-    // zombies : positions des pieds. Renvoie les explosions de l'image.
+    // zombies : [{ x, y, z, l, h }] (pieds et taille, voir monstres.cibles()).
+    // Renvoie les explosions de l'image.
     mettreAJour(dt, zombies) {
       const explosions = [];
       const pas = Math.ceil(dt / PAS_MAX);
@@ -44,7 +45,7 @@ export function creerProjectiles(scene) {
           impact = p.y <= Math.max(hauteurTerrain(p.x, p.z), -0.1) || g.t > DUREE_MAX;
           for (const z of zombies) {
             if (impact) break;
-            impact = Math.hypot(z.x - p.x, z.z - p.z) < RAYON_CONTACT && p.y > z.y && p.y < z.y + HAUTEUR_MONSTRE;
+            impact = Math.hypot(z.x - p.x, z.z - p.z) < RAYON_CONTACT * (z.l ?? 1) && p.y > z.y && p.y < z.y + HAUTEUR_MONSTRE * (z.h ?? 1);
           }
         }
         g.modele.lookAt(avant.copy(p).add(g.v));

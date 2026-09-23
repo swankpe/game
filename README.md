@@ -11,9 +11,9 @@ lien.
   chaque manche.
 - **Manche de 5 minutes**. Les zombies arrivent de plus en plus vite pendant
   la manche (2,5 fois plus à la fin qu'au début), et chaque manche en amène
-  davantage, plus rapides et plus résistants ; certains courent. Survivre
-  jusqu'au bout gagne la manche ; si le protégé meurt, c'est la défaite et tout
-  le monde retourne au camp.
+  davantage, plus rapides et plus résistants. Survivre jusqu'au bout gagne la
+  manche ; si le protégé meurt, c'est la défaite et tout le monde retourne au
+  camp.
 - **La nuit**, on ne voit bien que ce qu'éclaire la lanterne du protégé.
 - **Le protégé** ne bouge pas : il dirige la lanterne avec la souris.
   **F** lance l'**Illumination** : toute l'île éclairée pendant 30 secondes,
@@ -22,24 +22,48 @@ lien.
   déplacer, avec le protégé dessus. En portant, on ne tire pas et on avance
   moins vite.
 
+### Les zombies
+
+| Type | Prime | À quoi le reconnaître |
+| --- | --- | --- |
+| Rôdeur | 10 $ | le zombie ordinaire, bras tendus, yeux rouges |
+| Coureur | 15 $ | maigre et voûté, yeux jaunes : 1,6 fois plus rapide, mais tombe en deux balles |
+| Colosse | 60 $ | énorme, épaulière de fer : 6 fois plus résistant, lent, frappe 2,5 fois plus fort. Arrive après la première minute, 4 au plus à la fois |
+| Bouffi | 25 $ | ventre couvert de pustules vertes qui luisent : il **explose** |
+
+Le bouffi éclate au contact du poteau (25 points de vie en moins pour le
+protégé) ou quand on l'abat. L'explosion emporte aussi les zombies autour,
+bouffis compris (réaction en chaîne), et leurs primes vont à celui qui l'a
+abattu. Abattu trop près du poteau, il blesse quand même le protégé : tire-le
+de loin. La part des coureurs, colosses et bouffis grandit de manche en
+manche ; un message prévient à la première apparition de chaque type.
+
 ### Argent et armurerie
 
-Chaque zombie tué rapporte **10 $** à celui qui l'a abattu, et chaque manche
-gagnée **150 $** à tout le monde. L'argent repart à zéro à chaque nouvelle
-partie.
+Chaque zombie tué rapporte sa prime (de 10 à 60 $) à celui qui l'a abattu,
+et chaque manche gagnée **150 $** à tout le monde. L'argent repart à zéro à
+chaque nouvelle partie.
 
 L'**armurerie** est la cabane éclairée à l'ouest de l'île : approche-toi du
 comptoir et appuie sur **E**. Aller acheter, c'est laisser le poteau sans toi
 quelques instants.
 
-| Arme | Prix | En deux mots |
-| --- | --- | --- |
-| Pistolet | offert | précis ; 3 balles par zombie, 2 dans la tête |
-| Mini Uzi | 250 $ | rafale très rapide, dispersion de loin |
-| Fusil d'assaut | 600 $ | puissant et précis |
-| Lance-grenades | 1 200 $ | explose au contact, dégâts de zone |
+| Arme | Prix | Chargeur | En deux mots |
+| --- | --- | --- | --- |
+| Pistolet | offert | 12 (1,2 s) | précis ; 3 balles par rôdeur, 2 dans la tête |
+| Mini Uzi | 250 $ | 32 (1,6 s) | rafale très rapide, qui s'écarte et grimpe |
+| Fusil d'assaut | 600 $ | 30 (2 s) | puissant et précis au coup par coup |
+| Lance-grenades | 1 200 $ | 6 (2,8 s) | explose au contact, dégâts de zone |
 
-Munitions illimitées. Tous les réglages (prix, dégâts, cadence…) sont dans
+Munitions illimitées, mais il faut **recharger** : **R**, ou tout seul quand le
+chargeur est vide. Changer d'arme interrompt le rechargement ; chaque manche
+repart chargeurs pleins.
+
+**Recul** : chaque tir relève le regard et l'écarte un peu ; il revient de
+lui-même, mais en rafale le recul s'accumule (l'Uzi et le fusil grimpent :
+tire la souris vers le bas). La dispersion grandit aussi pendant une rafale,
+en courant et en sautant : les quatre traits du viseur montrent l'écart réel
+du prochain tir. Tous les réglages (prix, dégâts, cadence, recul…) sont dans
 `src/regles.js`.
 
 ## Jouer
@@ -59,6 +83,7 @@ la lanterne et l'Illumination.
 | ZQSD (AZERTY) ou WASD (QWERTY) | marcher |
 | souris | viser / diriger la lanterne |
 | clic gauche (maintenu) | tirer |
+| R | recharger |
 | 1 à 4, molette | changer d'arme |
 | E | porter / poser le poteau, ouvrir l'armurerie |
 | F | Illumination (protégé) |

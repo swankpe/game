@@ -6,14 +6,17 @@
 import { BOUTIQUE, estPraticable, rayonIle, resoudreCollisions } from './monde.js';
 import {
   ARMES, ARMES_DEPART, BONUS_MANCHE, DEGATS_MONSTRE, DISTANCE_BOUTIQUE, DISTANCE_PORTER, DUREE_DEFAITE,
-  DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE, MONSTRES_MAX, PART_COUREURS, PORTEE_ATTAQUE, POTEAU_DEPART,
-  PV_PROTEGE, RECHARGE_ILLUMINATION, RECOMPENSE_ZOMBIE, indiceArme, monstresParMinute, positionPortee,
-  pvMonstre, tirerProtege, vitesseMonstre,
+  DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE, EXPLOSION_BOUFFI, MONSTRES_MAX, PORTEE_ATTAQUE, POTEAU_DEPART,
+  PV_PROTEGE, RAYON_MONSTRE, RECHARGE_ILLUMINATION, TYPES_ZOMBIES, degatsExplosion, indiceArme, monstresParMinute,
+  poidsTypes, positionPortee, pvMonstre, tirerProtege, tirerType, vitesseMonstre,
 } from './regles.js';
 
 export const PHASES = ['attente', 'manche', 'pause', 'defaite'];
 
 const ESPACEMENT = 0.7;
+// Une explosion reste dans les instantanés le temps que tous la reçoivent.
+const DUREE_EXPLOSION = 1.5;
+const EXPLOSIONS_MAX = 12;
 const arrondi = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
 const fini = (v, defaut = 0) => (Number.isFinite(v) ? v : defaut);
 
@@ -32,6 +35,9 @@ function etatInitial() {
     monstres: [],
     prochainId: 1,
     cumul: 0,
+    // Explosions de bouffis récentes : { id, x, z, age }.
+    explosions: [],
+    prochaineExplosion: 1,
     // Argent et armes de chaque joueur : { id: { argent, armes } }.
     comptes: {},
   };
@@ -58,18 +64,60 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
       if (!meilleur || d > meilleur.d) meilleur = { x, z, d };
       if (d > 18) break;
     }
-    const coureur = aleatoire() < PART_COUREURS;
+    let k = tirerType(poidsTypes(s.manche, DUREE_MANCHE - s.reste), aleatoire());
+    const { max } = TYPES_ZOMBIES[k];
+    if (max && s.monstres.filter((m) => m.k === k).length >= max) k = 0;
+    const type = TYPES_ZOMBIES[k];
     s.monstres.push({
       id: s.prochainId++,
+      k,
       x: meilleur.x,
       z: meilleur.z,
       r: 0,
-      pv: pvMonstre(s.manche),
-      v: coureur ? 1.45 + aleatoire() * 0.25 : 0.85 + aleatoire() * 0.3,
+      pv: Math.round(pvMonstre(s.manche) * type.pv),
+      v: type.vitesse * (0.85 + aleatoire() * 0.3),
       a: false,
       // Côté par lequel il contourne un obstacle.
       c: aleatoire() < 0.5 ? -1 : 1,
     });
+  }
+
+  const typeDe = (m) => TYPES_ZOMBIES[m.k ?? 0] ?? TYPES_ZOMBIES[0];
+
+  // Retire un zombie abattu ; un bouffi explose en tombant.
+  function abattre(m, auteur) {
+    const i = s.monstres.indexOf(m);
+    if (i < 0) return;
+    s.monstres.splice(i, 1);
+    s.tues += 1;
+    const type = typeDe(m);
+    if (auteur && membres.some((j) => j.id === auteur)) compte(auteur).argent += type.recompense;
+    if (type.explosif) exploser(m, auteur, false);
+  }
+
+  function blesser(m, degats, auteur) {
+    m.pv -= degats;
+    if (m.pv > 0) return false;
+    abattre(m, auteur);
+    return true;
+  }
+
+  // Explosion d'un bouffi (déjà retiré de la liste). contact : il a atteint
+  // le poteau, le protégé prend tout.
+  function exploser(m, auteur, contact) {
+    const E = EXPLOSION_BOUFFI;
+    s.explosions.push({ id: s.prochaineExplosion++, x: m.x, z: m.z, age: 0 });
+    if (s.explosions.length > EXPLOSIONS_MAX) s.explosions.shift();
+    if (s.phase === 'manche') {
+      const d = contact ? 0 : Math.hypot(m.x - s.poteau.x, m.z - s.poteau.z);
+      s.pv -= degatsExplosion(E, d, E.protege);
+    }
+    // Les zombies autour, parfois d'autres bouffis : réaction en chaîne.
+    for (const autre of [...s.monstres]) {
+      if (!s.monstres.includes(autre)) continue;
+      const dg = degatsExplosion(E, Math.hypot(autre.x - m.x, autre.z - m.z));
+      if (dg > 0) blesser(autre, dg, auteur);
+    }
   }
 
   function commencerManche() {
@@ -84,12 +132,15 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
   function avancerMonstres(dt) {
     const vitesse = vitesseMonstre(s.manche);
     const { x: px, z: pz } = s.poteau;
+    const auContact = [];
     for (const m of s.monstres) {
+      const type = typeDe(m);
+      const portee = PORTEE_ATTAQUE + RAYON_MONSTRE * (type.largeur - 1);
       const dx = px - m.x, dz = pz - m.z;
       const d = Math.hypot(dx, dz);
       m.r = Math.atan2(dx, dz);
-      if (d > PORTEE_ATTAQUE) {
-        const pas = Math.min(vitesse * m.v * dt, d - PORTEE_ATTAQUE * 0.9);
+      if (d > portee) {
+        const pas = Math.min(vitesse * m.v * dt, d - portee * 0.9);
         const ux = dx / d, uz = dz / d;
         let suivant = resoudreCollisions(m.x + ux * pas, m.z + uz * pas);
         // Bloqué contre un mur ou un tronc : il glisse sur le côté.
@@ -101,23 +152,36 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
         m.x = suivant.x;
         m.z = suivant.z;
         m.a = false;
+      } else if (type.explosif) {
+        auContact.push(m);
       } else {
         m.a = true;
-        s.pv -= DEGATS_MONSTRE * dt;
+        s.pv -= DEGATS_MONSTRE * type.degats * dt;
       }
     }
-    // Les zombies se bousculent au lieu de s'empiler au même endroit.
+    // Un bouffi au contact explose : personne n'est crédité.
+    for (const m of auContact) {
+      const i = s.monstres.indexOf(m);
+      if (i < 0) continue;
+      s.monstres.splice(i, 1);
+      exploser(m, null, true);
+    }
+    // Les zombies se bousculent au lieu de s'empiler au même endroit ; un
+    // colosse pousse les autres plus qu'il n'est poussé.
     for (let i = 0; i < s.monstres.length; i++) {
       for (let j = i + 1; j < s.monstres.length; j++) {
         const a = s.monstres[i], b = s.monstres[j];
+        const la = typeDe(a).largeur, lb = typeDe(b).largeur;
+        const espace = ESPACEMENT * (la + lb) / 2;
         const dx = b.x - a.x, dz = b.z - a.z;
         const d = Math.hypot(dx, dz);
-        if (d < ESPACEMENT && d > 1e-6) {
-          const pousse = (ESPACEMENT - d) / 2;
-          a.x -= (dx / d) * pousse;
-          a.z -= (dz / d) * pousse;
-          b.x += (dx / d) * pousse;
-          b.z += (dz / d) * pousse;
+        if (d < espace && d > 1e-6) {
+          const pousse = espace - d;
+          const pa = (lb * lb) / (la * la + lb * lb);
+          a.x -= (dx / d) * pousse * pa;
+          a.z -= (dz / d) * pousse * pa;
+          b.x += (dx / d) * pousse * (1 - pa);
+          b.z += (dz / d) * pousse * (1 - pa);
         }
       }
     }
@@ -156,9 +220,11 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
 
     demarrer() {
       if (s.phase !== 'attente') return false;
-      const poteau = s.poteau;
+      const { poteau, prochaineExplosion } = s;
       s = etatInitial();
       s.poteau = { ...poteau, porteur: null };
+      // Les numéros d'explosion continuent : les autres ont gardé les anciens.
+      s.prochaineExplosion = prochaineExplosion;
       s.manche = 1;
       s.protege = tirerProtege(membres, { aleatoire, roleSolo });
       s.precedent = s.protege;
@@ -172,6 +238,8 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
       suivrePorteur(joueurs);
       s.illumination = Math.max(0, s.illumination - dt);
       s.recharge = Math.max(0, s.recharge - dt);
+      for (const e of s.explosions) e.age += dt;
+      s.explosions = s.explosions.filter((e) => e.age < DUREE_EXPLOSION);
 
       if (s.phase === 'manche') {
         s.reste -= dt;
@@ -203,9 +271,10 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
       } else if (s.phase === 'defaite') {
         s.reste -= dt;
         if (s.reste <= 0) {
-          const { poteau, comptes } = s;
+          const { poteau, comptes, prochaineExplosion } = s;
           s = etatInitial();
           s.poteau = poteau;
+          s.prochaineExplosion = prochaineExplosion;
           // On garde ses économies au camp ; elles repartent à zéro au lancement.
           s.comptes = comptes;
         }
@@ -214,15 +283,9 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
 
     // auteur : celui qui a tiré, crédité s'il est dans le salon.
     toucher(idMonstre, degats, auteur = null) {
-      const i = s.monstres.findIndex((m) => m.id === idMonstre);
-      if (i < 0 || !Number.isFinite(degats)) return false;
-      const m = s.monstres[i];
-      m.pv -= Math.min(Math.max(degats, 0), DEGATS_MAX);
-      if (m.pv > 0) return false;
-      s.monstres.splice(i, 1);
-      s.tues += 1;
-      if (auteur && membres.some((j) => j.id === auteur)) compte(auteur).argent += RECOMPENSE_ZOMBIE;
-      return true;
+      const m = s.monstres.find((x) => x.id === idMonstre);
+      if (!m || !Number.isFinite(degats)) return false;
+      return blesser(m, Math.min(Math.max(degats, 0), DEGATS_MAX), auteur);
     },
 
     // Achat à l'armurerie : il faut être devant le comptoir et avoir de quoi payer.
@@ -272,7 +335,8 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
         il: [arrondi(s.illumination, 1), arrondi(s.recharge, 1)],
         tu: s.tues,
         jo: Object.fromEntries(Object.entries(s.comptes).map(([id, c]) => [id, [c.argent, c.armes]])),
-        m: s.monstres.map((m) => [m.id, arrondi(m.x), arrondi(m.z), arrondi(m.r), m.a ? 1 : 0, arrondi(m.pv, 1), arrondi(m.v)]),
+        m: s.monstres.map((m) => [m.id, arrondi(m.x), arrondi(m.z), arrondi(m.r), m.a ? 1 : 0, arrondi(m.pv, 1), arrondi(m.v), m.k ?? 0]),
+        ex: s.explosions.map((e) => [e.id, arrondi(e.x), arrondi(e.z)]),
       };
     },
 
@@ -295,6 +359,8 @@ export function creerSimulation({ aleatoire = Math.random } = {}) {
         comptes: structuredClone(i.comptes),
         monstres: i.monstres.map((m) => ({ ...m })),
         prochainId: i.monstres.reduce((max, m) => Math.max(max, m.id), 0) + 1,
+        explosions: i.explosions.map((e) => ({ ...e, age: 0 })),
+        prochaineExplosion: i.explosions.reduce((max, e) => Math.max(max, e.id), 0) + 1,
       };
       return true;
     },
@@ -318,7 +384,12 @@ export function normaliserMonde(inst) {
       a: m[4] === 1,
       pv: fini(m[5], 30),
       v: fini(m[6], 1),
+      k: Number.isInteger(m[7]) && m[7] >= 0 && m[7] < TYPES_ZOMBIES.length ? m[7] : 0,
     }));
+  const explosions = (Array.isArray(inst.ex) ? inst.ex : [])
+    .slice(0, EXPLOSIONS_MAX)
+    .filter((e) => Array.isArray(e) && Number.isInteger(e[0]) && [e[1], e[2]].every(Number.isFinite))
+    .map(([id, x, z]) => ({ id, x, z }));
   return {
     phase: inst.ph,
     manche: Number.isInteger(inst.ma) ? inst.ma : 0,
@@ -331,6 +402,7 @@ export function normaliserMonde(inst) {
     tues: Number.isInteger(inst.tu) ? inst.tu : 0,
     comptes: normaliserComptes(inst.jo),
     monstres,
+    explosions,
   };
 }
 

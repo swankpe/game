@@ -11,11 +11,12 @@ import { creerMonstresVue } from './monstres.js';
 import { HAUTEUR_LANTERNE, creerPoteau } from './poteau.js';
 import { creerProjectiles } from './projectiles.js';
 import {
-  ARMES, ARMES_DEPART, BONUS_MANCHE, DISTANCE_BOUTIQUE, DISTANCE_PORTER, MULTIPLICATEUR_TETE, POTEAU_DEPART,
-  PV_PROTEGE, RECOMPENSE_ZOMBIE, degatsExplosion, indiceArme, positionPortee,
+  ARMES, ARMES_DEPART, BONUS_MANCHE, DISPERSION_MOUVEMENT, DISPERSION_SAUT, DISTANCE_BOUTIQUE, DISTANCE_PORTER,
+  EXPLOSION_BOUFFI, MULTIPLICATEUR_TETE, POTEAU_DEPART, PV_PROTEGE, TYPES_ZOMBIES, degatsExplosion, indiceArme,
+  positionPortee,
 } from './regles.js';
 import { creerSimulation, normaliserMonde } from './simulation.js';
-import { sonCaisse, sonExplosion, sonMort, sonTir, sonTouche } from './sons.js';
+import { sonCaisse, sonEclatement, sonExplosion, sonMort, sonRecharge, sonTir, sonTouche, sonVide } from './sons.js';
 import { creerVue } from './vue.js';
 
 const HAUTEUR_YEUX = 1.62;
@@ -32,7 +33,13 @@ const INTERVALLE_TIRS = 0.1;
 const TIRS_MAX = 24;
 const DEGATS_BALLE_MAX = Math.max(...ARMES.filter((a) => !a.projectile).map((a) => a.degats)) * MULTIPLICATEUR_TETE;
 const GRENADE = ARMES[indiceArme('lance')];
-
+// Bruits du rechargement, en fraction de sa durée : chargeur sorti, chargeur
+// engagé, culasse armée.
+const ETAPES_RECHARGE = [0.22, 0.62, 0.86];
+// Une explosion déjà montrée n'est plus rejouée (elle reste 1,5 s dans les
+// instantanés) ; on l'oublie un peu après.
+const MEMOIRE_EXPLOSION = 2.5;
+const pleins = () => Object.fromEntries(ARMES.map((a) => [a.id, a.chargeur]));
 const $ = (id) => document.getElementById(id);
 const arrondi = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
 const angle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -51,7 +58,7 @@ function mondeVide() {
   return {
     phase: 'attente', manche: 0, reste: 0, pv: PV_PROTEGE, protege: null,
     poteau: { x: POTEAU_DEPART.x, z: POTEAU_DEPART.z, porteur: null },
-    illumination: 0, recharge: 0, tues: 0, monstres: [], comptes: {},
+    illumination: 0, recharge: 0, tues: 0, monstres: [], comptes: {}, explosions: [],
   };
 }
 
@@ -103,6 +110,15 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   let infoTexte = '';
   let infoFin = 0;
   let secousse = 0;
+  // Balles dans chaque chargeur, rechargement en cours { id, debut, duree, etape }.
+  let munitions = pleins();
+  let rechargement = null;
+  // Dispersion ajoutée par la rafale en cours, qui se résorbe.
+  let evasement = 0;
+  const explosionsVues = new Map();
+  const typesVus = new Set();
+  // Alertes en attente (nouveaux types), montrées l'une après l'autre.
+  let alertes = [];
 
   const estHote = () => membres.length > 0 && membres[0].id === monId;
   const nomDe = (id) => membres.find((m) => m.id === id)?.nom ?? 'Quelqu’un';
@@ -120,6 +136,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     infoFin = horloge + duree;
   }
 
+  const armeEnMain = () => ARMES[indiceArme(armeEquipee)];
+
   function equiper(id) {
     if (!possede(id)) {
       const a = ARMES[indiceArme(id)];
@@ -127,9 +145,45 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       return;
     }
     if (armeEquipee === id) return;
+    // Changer d'arme interrompt le rechargement : le chargeur reste tel quel.
+    rechargement = null;
+    evasement = 0;
     armeEquipee = id;
     arme.equiper(id);
     envoyerEtat(true);
+  }
+
+  function recharger() {
+    const a = armeEnMain();
+    if (rechargement || munitions[a.id] >= a.chargeur) return;
+    rechargement = { id: a.id, debut: horloge, duree: a.rechargement, etape: 0 };
+    arme.recharger(a.rechargement);
+  }
+
+  function annulerRechargement() {
+    if (!rechargement) return;
+    rechargement = null;
+    arme.annulerRecharge();
+  }
+
+  function suivreRechargement() {
+    if (!rechargement) return;
+    const f = (horloge - rechargement.debut) / rechargement.duree;
+    while (rechargement.etape < ETAPES_RECHARGE.length && f >= ETAPES_RECHARGE[rechargement.etape]) {
+      sonRecharge(rechargement.etape, rechargement.id);
+      rechargement.etape += 1;
+    }
+    if (f >= 1) {
+      munitions[rechargement.id] = ARMES[indiceArme(rechargement.id)].chargeur;
+      rechargement = null;
+    }
+  }
+
+  // Dispersion du prochain tir : l'arme, la rafale, le mouvement.
+  function dispersionActuelle() {
+    const a = armeEnMain();
+    const e = joueur.etat;
+    return a.dispersion + evasement + e.vitesse * DISPERSION_MOUVEMENT + (e.auSol === false ? DISPERSION_SAUT : 0);
   }
 
   function armeSuivante(sens) {
@@ -172,26 +226,36 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     }
   }
 
-  // Direction du regard, écartée au hasard dans le cône de dispersion.
+  // Direction du regard (recul compris), écartée au hasard dans le cône de
+  // dispersion : un disque, comme les quatre traits du viseur.
   function directionTir(dispersion) {
-    const l = vue.etat.lacet + (Math.random() - 0.5) * 2 * dispersion;
-    const t = vue.etat.tangage + (Math.random() - 0.5) * 2 * dispersion;
+    const angle = Math.random() * Math.PI * 2;
+    const ecart = Math.sqrt(Math.random()) * dispersion;
+    const l = vue.lacet + Math.cos(angle) * ecart;
+    const t = vue.tangage + Math.sin(angle) * ecart;
     const c = Math.cos(t);
     return [-Math.sin(l) * c, Math.sin(t), -Math.cos(l) * c];
   }
 
   function tirer() {
-    const a = ARMES[indiceArme(armeEquipee)];
+    const a = armeEnMain();
+    const dispersion = dispersionActuelle();
     cadence = a.cadence;
+    munitions[a.id] -= 1;
     const bouche = arme.tirer();
     arme.eclair(bouche, a.projectile ? 1.6 : 1);
     sonTir(1, a.id);
-    // Le recul relève le regard : il faut le corriger en rafale.
-    vue.etat.tangage = Math.min(vue.etat.tangage + a.recul, 1.45);
-    vue.etat.lacet += (Math.random() - 0.5) * a.recul * 0.6;
+    // Le recul relève le regard et l'écarte : en rafale, il s'accumule.
+    vue.reculer(a.recul * (0.8 + Math.random() * 0.4), (Math.random() - 0.5) * 2 * a.reculLateral);
+    evasement = Math.min(evasement + a.evasement, a.evasementMax);
+    // Dernière balle : clic à vide, et le rechargement part tout seul.
+    if (munitions[a.id] <= 0) {
+      sonVide();
+      recharger();
+    }
 
     if (a.projectile) {
-      const d = directionTir(a.dispersion);
+      const d = directionTir(dispersion);
       const v = new THREE.Vector3(d[0], d[1], d[2]).multiplyScalar(a.vitesse).add(new THREE.Vector3(0, 1.5, 0));
       projectiles.lancer(bouche, v, true);
       envoyer({ type: 'grenade', o: [bouche.x, bouche.y, bouche.z].map((x) => arrondi(x)), v: [v.x, v.y, v.z].map((x) => arrondi(x)) });
@@ -199,7 +263,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     }
 
     const o = camera.getWorldPosition(new THREE.Vector3());
-    const d = directionTir(a.dispersion);
+    const d = directionTir(dispersion);
     const portee = distanceSol(o, d, a.portee) ?? a.portee;
     const touche = monstres.toucher([o.x, o.y, o.z], d, portee);
     const distance = touche ? touche.distance : portee;
@@ -228,11 +292,18 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     prochainEnvoiTirs = horloge + INTERVALLE_TIRS;
   }
 
-  function exploser(position, locale) {
-    arme.explosion(position, GRENADE.rayon);
+  // Effet d'une explosion, grenade ou bouffi : lumière, son, secousse.
+  function effetExplosion(position, rayon, genre) {
+    arme.explosion(position, rayon, genre);
     const distance = position.distanceTo(camera.position);
-    sonExplosion(Math.max(0.15, 1 - distance / 60));
+    const volume = Math.max(0.15, 1 - distance / 60);
+    if (genre === 'bouffi') sonEclatement(volume);
+    else sonExplosion(volume);
     secousse = Math.max(secousse, 1 - distance / 18);
+  }
+
+  function exploser(position, locale) {
+    effetExplosion(position, GRENADE.rayon, 'grenade');
     if (!locale) return;
     // Seul le tireur compte les dégâts de sa grenade.
     const cibles = monstres.autourDe(position, GRENADE.rayon)
@@ -245,6 +316,33 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     } else if (cibles.length) {
       envoyer({ type: 'explosion', c: cibles });
     }
+  }
+
+  // Bouffis éclatés : l'hôte les annonce dans l'instantané, chacun les montre
+  // une fois. Les dégâts, eux, sont déjà comptés par la simulation.
+  function jouerExplosions() {
+    for (const e of monde.explosions ?? []) {
+      if (explosionsVues.has(e.id)) continue;
+      explosionsVues.set(e.id, horloge);
+      if (sim) urgent = true;
+      const y = Math.max(hauteurTerrain(e.x, e.z), -0.1) + 1;
+      effetExplosion(new THREE.Vector3(e.x, y, e.z), EXPLOSION_BOUFFI.rayon, 'bouffi');
+    }
+    for (const [id, quand] of explosionsVues) if (horloge - quand > MEMOIRE_EXPLOSION) explosionsVues.delete(id);
+  }
+
+  // Premier colosse, premier bouffi de la partie : on prévient.
+  function signalerNouveauxTypes() {
+    if (monde.phase !== 'manche') {
+      alertes = [];
+      return;
+    }
+    for (const k of monstres.types()) {
+      if (typesVus.has(k)) continue;
+      typesVus.add(k);
+      if (TYPES_ZOMBIES[k]?.alerte) alertes.push(TYPES_ZOMBIES[k].alerte);
+    }
+    if (alertes.length && horloge >= infoFin) informer(alertes.shift(), 3);
   }
 
   // --- Armurerie -----------------------------------------------------------
@@ -267,6 +365,10 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       titre.textContent = a.nom;
       const texte = document.createElement('p');
       texte.textContent = a.description;
+      const chargeur = document.createElement('p');
+      chargeur.className = 'chargeur';
+      const secondes = String(a.rechargement).replace('.', ',');
+      chargeur.textContent = `${a.projectile ? 'Barillet' : 'Chargeur'} de ${a.chargeur} · rechargement ${secondes} s`;
       const stats = document.createElement('dl');
       for (const [nom, valeur] of [
         ['Puissance', a.degats / a.cadence / max.puissance],
@@ -288,7 +390,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       bouton.type = 'button';
       bouton.className = 'principal';
       bouton.addEventListener('click', () => acheterOuEquiper(a.id));
-      carte.append(image, titre, texte, stats, bouton);
+      carte.append(image, titre, texte, chargeur, stats, bouton);
       liste.append(carte);
       cartes.set(a.id, { carte, bouton });
     }
@@ -331,7 +433,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
   }
 
   construireBoutique();
-  $('boutique-regle').textContent = `${RECOMPENSE_ZOMBIE} $ par zombie, ${BONUS_MANCHE} $ par manche gagnée`;
+  const primes = TYPES_ZOMBIES.map((t) => t.recompense);
+  $('boutique-regle').textContent = `${Math.min(...primes)} à ${Math.max(...primes)} $ par zombie selon le type, ${BONUS_MANCHE} $ par manche gagnée`;
   $('boutique-fermer').addEventListener('click', fermerBoutique);
 
   // Barre des armes, en bas à droite.
@@ -375,7 +478,11 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     }
     if (r === 'protege' && clavier.consommer('KeyF')) action('illuminer', () => sim.demanderIllumination(monId));
     if (monde.phase === 'attente' && clavier.consommer('Enter')) lancer();
-    if (vue.etat.gachette && r !== 'protege' && !jePorte() && cadence <= 0 && arme.prete()) tirer();
+    const enMain = r !== 'protege' && !jePorte();
+    if (enMain && clavier.consommer('KeyR')) recharger();
+    // Chargeur vide (après un changement d'arme, par exemple) : on recharge.
+    if (enMain && munitions[armeEquipee] <= 0 && arme.prete()) recharger();
+    if (vue.etat.gachette && enMain && !rechargement && munitions[armeEquipee] > 0 && cadence <= 0 && arme.prete()) tirer();
   }
 
   function pretAPorter() {
@@ -493,6 +600,13 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       annoncer('Illumination !', "Toute l'île est éclairée pendant 30 secondes.", 2.5);
     }
     if (pv < precedent.pv && protege === monId) degats = 1;
+    // Chaque manche repart chargeurs pleins ; une nouvelle partie oublie les
+    // types déjà vus.
+    if (phase === 'manche' && (precedent.phase !== 'manche' || manche !== precedent.manche)) {
+      annulerRechargement();
+      munitions = pleins();
+      if (manche === 1) typesVus.clear();
+    }
     precedent = { phase, manche, protege, pv, illumination };
 
     // Argent gagné, arme achetée : on le montre, et la nouvelle arme passe en main.
@@ -509,6 +623,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       sonCaisse();
       const achetee = ARMES.findLast((a, i) => nouvelles & (1 << i));
       if (achetee) {
+        munitions[achetee.id] = achetee.chargeur;
         equiper(achetee.id);
         informer(`${achetee.nom} achetée !`);
       }
@@ -562,8 +677,23 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       illum.hidden = true;
     }
 
+    const enMain = fps && r !== 'protege' && !boutiqueOuverte && !jePorte();
     $('viseur').hidden = !fps || r === 'protege' || boutiqueOuverte;
     if (horloge > marqueurFin) delete $('viseur').dataset.touche;
+    // Les traits du viseur s'écartent avec la dispersion réelle du tir.
+    const demiChamp = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const ecart = (Math.tan(dispersionActuelle()) / demiChamp) * (innerHeight / 2);
+    $('viseur').style.setProperty('--ecart', `${(4 + ecart).toFixed(1)}px`);
+    const a = armeEnMain();
+    const reste = munitions[a.id];
+    $('munitions').hidden = !enMain;
+    $('munitions-chargeur').textContent = String(reste);
+    $('munitions-max').textContent = `/ ${a.chargeur}`;
+    $('munitions').dataset.bas = String(reste <= Math.ceil(a.chargeur / 4));
+    $('munitions-nom').textContent = a.nom;
+    const recharge = $('recharge');
+    recharge.hidden = !enMain || !rechargement;
+    if (rechargement) recharge.style.setProperty('--progression', String(Math.min(1, (horloge - rechargement.debut) / rechargement.duree)));
     $('annonce').hidden = horloge > annonceFin;
 
     const indication = $('indication');
@@ -588,7 +718,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
     $('aide').textContent =
       r === 'protege' ? 'Souris : diriger la lanterne · F : Illumination'
         : jePorte() ? 'Tu portes le poteau : pas de tir, tu avances moins vite'
-          : 'ZQSD : marcher · Clic : tirer · 1-4 ou molette : arme · E : poteau / armurerie · Maj : courir · Échap : souris';
+          : 'ZQSD : marcher · Clic : tirer · R : recharger · 1-4 ou molette : arme · E : poteau / armurerie · Maj : courir · Échap : souris';
 
     degats = Math.max(0, degats - dt * 2.5);
     $('degats').style.opacity = String(degats * 0.8);
@@ -632,6 +762,10 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       tirsDifferes = [];
       armeEquipee = 'pistolet';
       arme.equiper('pistolet');
+      annulerRechargement();
+      munitions = pleins();
+      explosionsVues.clear();
+      typesVus.clear();
       argentPrecedent = 0;
       armesPrecedentes = ARMES_DEPART;
       poteau.occuper('personne');
@@ -721,7 +855,12 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           phase: monde.phase, manche: monde.manche, reste: monde.reste, pv: monde.pv, protege: monde.protege,
           porteur: monde.poteau.porteur, poteau: [monde.poteau.x, monde.poteau.z], tues: monde.tues,
           illumination: monde.illumination, recharge: monde.recharge, monId, hote: estHote(), role: role(),
-          zombies: [...monstres.vivants()].map((p) => [p.x, p.y, p.z]),
+          zombies: monstres.cibles().map((c) => [c.x, c.y, c.z]),
+          types: monde.monstres.map((m) => TYPES_ZOMBIES[m.k ?? 0].id),
+          munitions: { ...munitions },
+          rechargement: rechargement ? rechargement.id : null,
+          progression: rechargement ? (horloge - rechargement.debut) / rechargement.duree : null,
+          explosions: [...explosionsVues.keys()],
           joueur: [joueur.etat.x, joueur.etat.y, joueur.etat.z],
           vue: { ...vue.etat },
         }),
@@ -738,7 +877,24 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
           urgent = true;
           return true;
         },
+        // Hôte seulement : poser un zombie d'un type donné (immobile par défaut)
+        // et éclairer l'île, pour regarder les modèles de près.
+        poserZombie(type, x, z, vitesse = 0, pv = 999) {
+          const k = TYPES_ZOMBIES.findIndex((t) => t.id === type);
+          if (!sim || k < 0 || sim.etat.phase !== 'manche') return null;
+          const id = 5000 + sim.etat.prochainId++;
+          sim.etat.monstres.push({ id, k, x, z, r: 0, pv, v: vitesse, a: false, c: 1 });
+          urgent = true;
+          return id;
+        },
+        illuminer() {
+          if (!sim) return false;
+          sim.etat.illumination = 30;
+          urgent = true;
+          return true;
+        },
         equiper,
+        recharger,
         boutique: () => ({ ouverte: boutiqueOuverte, arme: armeEquipee, compte: monCompte() }),
         acheter: acheterOuEquiper,
       };
@@ -767,10 +923,18 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         monde.recharge = Math.max(0, monde.recharge - dt);
       }
       suivreChangements();
+      jouerExplosions();
+      signalerNouveauxTypes();
 
       if (fps !== enJeu) enJeu ? this.entrer() : this.sortir();
       if (fps) commandesLocales(dt);
       else clavier.oublier();
+      // Plus d'arme en main (poteau porté, boutique, protégé) : on arrête de recharger.
+      if (!fps || role() === 'protege' || jePorte() || boutiqueOuverte) annulerRechargement();
+      suivreRechargement();
+      const enMain = armeEnMain();
+      vue.stabiliser(dt, enMain.retour);
+      evasement *= Math.exp(-dt * enMain.retour);
 
       const r = role();
       if (fps && r === 'protege') fermerBoutique();
@@ -828,7 +992,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         }
         tirsDifferes = restants;
       }
-      for (const { position, locale } of projectiles.mettreAJour(dt, [...monstres.vivants()])) exploser(position, locale);
+      for (const { position, locale } of projectiles.mettreAJour(dt, monstres.cibles())) exploser(position, locale);
       envoyerTirs();
 
       ile.ambiance(monde.phase === 'attente' ? 'jour' : monde.illumination > 0 ? 'illumination' : 'nuit');

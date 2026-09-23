@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { creerSimulation, normaliserMonde } from '../src/simulation.js';
 import {
   ARMES, ARMES_DEPART, BONUS_MANCHE, DISTANCE_PORTER, DUREE_DEFAITE, DUREE_ILLUMINATION, DUREE_MANCHE, DUREE_PAUSE,
-  PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART, RECHARGE_ILLUMINATION, RECOMPENSE_ZOMBIE, degatsExplosion, indiceArme,
-  monstresParMinute, positionPortee, premierTouche, pvMonstre, tirerProtege, vitesseMonstre,
+  EXPLOSION_BOUFFI, HAUTEUR_TETE, PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART, RECHARGE_ILLUMINATION, TYPES_ZOMBIES,
+  degatsExplosion, indiceArme, indiceType, monstresParMinute, poidsTypes, positionPortee, premierTouche, pvMonstre,
+  tirerProtege, tirerType, vitesseMonstre,
 } from '../src/regles.js';
 import { BOUTIQUE, CABANE, estPraticable, resoudreCollisions } from '../src/monde.js';
 
@@ -24,6 +25,15 @@ function lancer(ids = ['a', 'b', 'c', 'd'], options) {
 
 function avancer(sim, secondes, j = joueurs(), pas = 0.1) {
   for (let t = 0; t < secondes; t += pas) sim.pas(pas, j);
+}
+
+// Un zombie posé à la main, sans autres apparitions.
+function seul(sim, type, x, z, extra = {}) {
+  const k = indiceType(type);
+  sim.etat.cumul = -1e9;
+  const m = { id: 900 + sim.etat.monstres.length, k, x, z, r: 0, pv: Math.round(pvMonstre(sim.etat.manche) * TYPES_ZOMBIES[k].pv), v: 1, a: false, c: 1, ...extra };
+  sim.etat.monstres.push(m);
+  return m;
 }
 
 // Défenseurs parfaits : chaque zombie meurt dès son apparition.
@@ -67,20 +77,26 @@ test("les zombies sortent de l'eau, marchent vers le poteau et blessent le prot�
   avancer(sim, 3);
   const s = sim.etat;
   assert.ok(s.monstres.length >= 1, 'un premier zombie dans les premières secondes');
-  const premier = s.monstres[0];
+  let t = 3;
+  while (!s.monstres.some((m) => m.k === 0) && t < 30) {
+    sim.pas(0.1, joueurs());
+    t += 0.1;
+  }
+  // Un rôdeur : un bouffi exploserait au poteau avant la fin du test.
+  const premier = s.monstres.find((m) => m.k === 0);
   const depart = Math.hypot(premier.x - s.poteau.x, premier.z - s.poteau.z);
   assert.ok(depart > 15, 'apparition loin du poteau');
-  avancer(sim, 25);
+  avancer(sim, 6);
   const apres = s.monstres.find((m) => m.id === premier.id);
-  assert.ok(Math.hypot(apres.x - s.poteau.x, apres.z - s.poteau.z) < depart - 10, 'il se rapproche');
+  assert.ok(Math.hypot(apres.x - s.poteau.x, apres.z - s.poteau.z) < depart - 8, 'il se rapproche');
   avancer(sim, 20);
   assert.ok(s.pv < PV_PROTEGE, 'le protégé perd de la vie au contact');
 });
 
-test('trois balles tuent un zombie, deux suffisent dans la tête', () => {
+test('trois balles tuent un rôdeur, deux suffisent dans la tête', () => {
   const sim = lancer();
-  avancer(sim, 3);
-  const [m] = sim.etat.monstres;
+  sim.etat.monstres = [];
+  const m = seul(sim, 'rodeur', 30, 0);
   assert.equal(m.pv, PV_MONSTRE);
   assert.ok(!sim.toucher(m.id, 10));
   assert.ok(!sim.toucher(m.id, 10));
@@ -236,22 +252,24 @@ test('un zombie coincé derrière la cabane la contourne et atteint le poteau', 
   const sim = lancer();
   const s = sim.etat;
   s.cumul = -1e9; // pas d'autres apparitions
-  s.monstres = [{ id: 999, x: CABANE.x - CABANE.profondeur / 2 - 1.5, z: CABANE.z, r: 0, pv: 30, v: 1, a: false, c: 1 }];
+  s.monstres = [{ id: 999, k: 0, x: CABANE.x - CABANE.profondeur / 2 - 1.5, z: CABANE.z, r: 0, pv: 30, v: 1, a: false, c: 1 }];
   avancer(sim, 40);
   const m = s.monstres[0];
   assert.ok(Math.hypot(m.x - s.poteau.x, m.z - s.poteau.z) < 2, `arrivé au poteau (${m.x.toFixed(1)}, ${m.z.toFixed(1)})`);
 });
 
-test('chaque zombie tué rapporte au tireur, pas aux autres', () => {
+test('chaque zombie tué rapporte au tireur, pas aux autres, selon son type', () => {
   const sim = lancer(['a', 'b']);
-  avancer(sim, 3);
-  const [m] = sim.etat.monstres;
-  assert.ok(sim.toucher(m.id, 100, 'a'));
-  assert.equal(sim.etat.comptes.a.argent, RECOMPENSE_ZOMBIE);
+  sim.etat.monstres = [];
+  const rodeur = seul(sim, 'rodeur', 30, 0);
+  const colosse = seul(sim, 'colosse', -30, 0);
+  const coureur = seul(sim, 'coureur', 0, 30);
+  assert.ok(sim.toucher(rodeur.id, 100, 'a'));
+  assert.equal(sim.etat.comptes.a.argent, TYPES_ZOMBIES[indiceType('rodeur')].recompense);
   assert.equal(sim.etat.comptes.b?.argent ?? 0, 0);
-  avancer(sim, 3);
-  const [m2] = sim.etat.monstres;
-  assert.ok(sim.toucher(m2.id, 100, 'intrus'), 'un inconnu tue, mais ne gagne rien');
+  while (!sim.toucher(colosse.id, 100, 'b'));
+  assert.equal(sim.etat.comptes.b.argent, TYPES_ZOMBIES[indiceType('colosse')].recompense);
+  assert.ok(sim.toucher(coureur.id, 100, 'intrus'), 'un inconnu tue, mais ne gagne rien');
   assert.equal(sim.etat.comptes.intrus, undefined);
 });
 
@@ -312,4 +330,125 @@ test("la grenade blesse moins au bord de l'explosion, pas du tout au-delà", () 
   assert.equal(degatsExplosion(lance, 0), lance.degats);
   assert.ok(degatsExplosion(lance, lance.rayon) < lance.degats * 0.5);
   assert.equal(degatsExplosion(lance, lance.rayon + 0.1), 0);
+});
+
+test('les types de zombies : le coureur file, le colosse encaisse, le bouffi explose', () => {
+  const [rodeur, coureur, colosse, bouffi] = ['rodeur', 'coureur', 'colosse', 'bouffi'].map((id) => TYPES_ZOMBIES[indiceType(id)]);
+  assert.ok(coureur.vitesse > rodeur.vitesse && coureur.pv < rodeur.pv);
+  assert.ok(colosse.pv >= 5 && colosse.vitesse < rodeur.vitesse && colosse.degats > rodeur.degats);
+  assert.ok(colosse.hauteur > 1.3 && colosse.largeur > 1.3);
+  assert.ok(bouffi.explosif && !rodeur.explosif);
+  // Plus il est dur à abattre, plus il rapporte.
+  assert.ok(rodeur.recompense < coureur.recompense && coureur.recompense < bouffi.recompense && bouffi.recompense < colosse.recompense);
+  // Le colosse se hisse sur la terre plus lentement mais frappe plus fort.
+  const sim = lancer();
+  sim.etat.monstres = [];
+  const c = seul(sim, 'colosse', sim.etat.poteau.x + 1, sim.etat.poteau.z);
+  const pv = sim.etat.pv;
+  for (let i = 0; i < 10; i++) sim.pas(0.1, joueurs());
+  assert.ok(c.a, 'au contact');
+  assert.ok(Math.abs(pv - sim.etat.pv - 6 * colosse.degats) < 0.01, `${pv - sim.etat.pv} points perdus en une seconde`);
+});
+
+test('des coureurs dès le début, des colosses après la première minute, et plus de spéciaux ensuite', () => {
+  const partDe = (manche, ecoule, k) => poidsTypes(manche, ecoule)[k] / poidsTypes(manche, ecoule).reduce((a, b) => a + b);
+  assert.equal(partDe(1, 30, indiceType('colosse')), 0);
+  assert.ok(partDe(1, 120, indiceType('colosse')) > 0);
+  assert.ok(partDe(1, 0, indiceType('rodeur')) > 0.6, 'surtout des rôdeurs en manche 1');
+  for (const k of [1, 2, 3]) assert.ok(partDe(4, 150, k) > partDe(1, 150, k));
+  assert.equal(tirerType([1, 1, 0, 1], 0), 0);
+  assert.equal(tirerType([1, 1, 0, 1], 0.4), 1);
+  assert.equal(tirerType([1, 1, 0, 1], 0.9), 3);
+
+  // Une manche entière défendue : les quatre types se montrent.
+  const sim = lancer();
+  const vus = new Set();
+  let colossesMax = 0;
+  for (let t = 0; t < DUREE_MANCHE - 1; t += 0.1) {
+    sim.pas(0.1, joueurs());
+    colossesMax = Math.max(colossesMax, sim.etat.monstres.filter((m) => m.k === indiceType('colosse')).length);
+    for (const m of [...sim.etat.monstres]) {
+      vus.add(m.k);
+      // Les colosses ne sont pas abattus tout de suite : le plafond doit tenir.
+      if (m.k !== indiceType('colosse') || t % 20 < 0.1) sim.toucher(m.id, 200);
+    }
+  }
+  assert.deepEqual([...vus].sort(), [0, 1, 2, 3]);
+  assert.ok(colossesMax <= TYPES_ZOMBIES[indiceType('colosse')].max);
+});
+
+test('un bouffi au contact du poteau explose : le protégé perd 25 points, les zombies voisins aussi', () => {
+  const sim = lancer();
+  const s = sim.etat;
+  s.monstres = [];
+  const b = seul(sim, 'bouffi', s.poteau.x + 3, s.poteau.z);
+  const voisin = seul(sim, 'rodeur', s.poteau.x - 1.2, s.poteau.z, { v: 0 });
+  let t = 0;
+  while (s.monstres.includes(b) && t < 5) {
+    sim.pas(0.05, joueurs());
+    t += 0.05;
+  }
+  assert.ok(!s.monstres.includes(b), 'le bouffi a disparu');
+  assert.equal(s.tues, 1, 'seul le rôdeur compte parmi les éliminés');
+  assert.ok(PV_PROTEGE - s.pv >= EXPLOSION_BOUFFI.protege, `${PV_PROTEGE - s.pv} points perdus`);
+  assert.ok(!s.monstres.includes(voisin), 'le rôdeur collé au poteau est emporté');
+  const [ex] = sim.instantane().ex;
+  assert.equal(ex.length, 3);
+  assert.ok(Math.hypot(ex[1] - s.poteau.x, ex[2] - s.poteau.z) < 2);
+  // L'explosion reste dans les instantanés un court moment, puis s'efface.
+  avancer(sim, 2);
+  assert.deepEqual(sim.instantane().ex, []);
+});
+
+test('abattre un bouffi fait exploser ses voisins, bouffis compris, et le tireur touche les primes', () => {
+  const sim = lancer(['a', 'b']);
+  const s = sim.etat;
+  s.monstres = [];
+  const [x, z] = [s.poteau.x + 25, s.poteau.z];
+  const b1 = seul(sim, 'bouffi', x, z);
+  const b2 = seul(sim, 'bouffi', x + 2, z);
+  const r1 = seul(sim, 'rodeur', x + 4.5, z);
+  const loin = seul(sim, 'rodeur', x + 12, z);
+  const pv = s.pv;
+  while (!sim.toucher(b1.id, 30, 'a'));
+  assert.ok(!s.monstres.includes(b2), 'le second bouffi explose à son tour');
+  assert.ok(!s.monstres.includes(r1), 'le rôdeur près du second bouffi y passe');
+  assert.ok(s.monstres.includes(loin), 'trop loin pour être touché');
+  assert.equal(s.pv, pv, 'loin du poteau, le protégé ne sent rien');
+  assert.equal(s.tues, 3);
+  const prime = (id) => TYPES_ZOMBIES[indiceType(id)].recompense;
+  assert.equal(s.comptes.a.argent, 2 * prime('bouffi') + prime('rodeur'));
+  assert.equal(sim.instantane().ex.length, 2);
+
+  // Un bouffi abattu trop près du poteau blesse quand même le protégé.
+  const proche = seul(sim, 'bouffi', s.poteau.x + 2, s.poteau.z);
+  while (!sim.toucher(proche.id, 30, 'a'));
+  assert.ok(s.pv < pv && s.pv > pv - EXPLOSION_BOUFFI.protege);
+});
+
+test('les instantanés transmettent types et explosions, bornés et vérifiés', () => {
+  const sim = lancer();
+  sim.etat.monstres = [];
+  seul(sim, 'colosse', 20, 0);
+  const b = seul(sim, 'bouffi', -20, 0);
+  sim.toucher(b.id, 100);
+  const inst = JSON.parse(JSON.stringify(sim.instantane()));
+  const n = normaliserMonde(inst);
+  assert.deepEqual(n.monstres.map((m) => m.k), [indiceType('colosse')]);
+  assert.equal(n.explosions.length, 1);
+  const repris = creerSimulation();
+  assert.ok(repris.charger(inst));
+  assert.deepEqual(repris.instantane(), sim.instantane());
+  const bizarre = normaliserMonde({ ph: 'manche', m: [[1, 0, 0, 0, 0, 30, 1, 99], [2, 0, 0, 0, 0, 30, 1, 1.5]], ex: [[1, 2], ['a', 1, 1], [3, 1, 1], 'x'] });
+  assert.deepEqual(bizarre.monstres.map((m) => m.k), [0, 0]);
+  assert.deepEqual(bizarre.explosions, [{ id: 3, x: 1, z: 1 }]);
+});
+
+test('un colosse est plus facile à toucher, et sa tête est plus haute', () => {
+  const colosse = TYPES_ZOMBIES[indiceType('colosse')];
+  const cibles = [{ id: 1, x: 0.5, y: 0, z: -10, l: colosse.largeur, h: colosse.hauteur }];
+  assert.ok(premierTouche([0, 1.2, 0], [0, 0, -1], cibles), 'touché à 0,5 m du centre');
+  assert.equal(premierTouche([0, 1.2, 0], [0, 0, -1], [{ ...cibles[0], l: 1, h: 1 }]), null, 'un rôdeur au même endroit est manqué');
+  assert.ok(!premierTouche([0, HAUTEUR_TETE + 0.1, 0], [0, 0, -1], cibles).tete, 'à hauteur de tête de rôdeur : le torse');
+  assert.ok(premierTouche([0, HAUTEUR_TETE * colosse.hauteur + 0.1, 0], [0, 0, -1], cibles).tete);
 });

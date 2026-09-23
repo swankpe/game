@@ -116,3 +116,69 @@ export function sonMort() {
   o.start();
   o.stop(ctx.currentTime + 0.6);
 }
+
+// Petit bruit métallique : un clic, filtré autour de frequence.
+function clic(ctx, frequence, volume, duree = 0.05, delai = 0) {
+  const source = ctx.createBufferSource();
+  source.buffer = bruit;
+  const filtre = ctx.createBiquadFilter();
+  filtre.type = 'bandpass';
+  filtre.frequency.value = frequence;
+  filtre.Q.value = 6;
+  const g = ctx.createGain();
+  const debut = ctx.currentTime + delai;
+  g.gain.setValueAtTime(volume, debut);
+  g.gain.exponentialRampToValueAtTime(0.0001, debut + duree);
+  g.connect(ctx.destination);
+  source.connect(filtre).connect(g);
+  source.start(debut);
+  source.stop(debut + duree + 0.02);
+}
+
+// Chargeur vide : la détente claque dans le vide.
+export function sonVide() {
+  const ctx = audio();
+  if (!ctx) return;
+  clic(ctx, 2600, 0.35, 0.04);
+}
+
+// Étapes du rechargement : 0 chargeur sorti, 1 chargeur engagé, 2 culasse
+// armée. Le barillet du lance-grenades cliquette en tournant.
+export function sonRecharge(etape, arme = 'pistolet') {
+  const ctx = audio();
+  if (!ctx) return;
+  if (arme === 'lance') {
+    if (etape === 2) clic(ctx, 900, 0.5, 0.09);
+    else for (let i = 0; i < 3; i++) clic(ctx, 1800, 0.22, 0.03, i * 0.09);
+    return;
+  }
+  const grave = arme === 'fusil' ? 0.8 : arme === 'uzi' ? 1.15 : 1;
+  if (etape === 0) clic(ctx, 1200 * grave, 0.3, 0.07);
+  else if (etape === 1) clic(ctx, 700 * grave, 0.45, 0.08);
+  else {
+    clic(ctx, 1500 * grave, 0.4, 0.05);
+    clic(ctx, 1000 * grave, 0.35, 0.06, 0.07);
+  }
+}
+
+// Un bouffi qui éclate : un souffle mou et un bruit mouillé.
+export function sonEclatement(volume = 1) {
+  const ctx = audio();
+  if (!ctx || volume <= 0.01) return;
+  const source = ctx.createBufferSource();
+  source.buffer = bruit;
+  const filtre = ctx.createBiquadFilter();
+  filtre.type = 'lowpass';
+  filtre.frequency.setValueAtTime(900, ctx.currentTime);
+  filtre.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.5);
+  source.connect(filtre).connect(enveloppe(ctx, 0.7 * volume, 0.6));
+  source.start();
+  source.stop(ctx.currentTime + 0.4);
+  const bulle = ctx.createOscillator();
+  bulle.type = 'sine';
+  bulle.frequency.setValueAtTime(260, ctx.currentTime);
+  bulle.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.35);
+  bulle.connect(enveloppe(ctx, 0.8 * volume, 0.45));
+  bulle.start();
+  bulle.stop(ctx.currentTime + 0.5);
+}

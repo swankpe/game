@@ -33,7 +33,7 @@ valide.
 | Message (broadcast `jeu`) | Émetteur | Contenu |
 | --- | --- | --- |
 | `etat` | chaque joueur | position, orientation du corps `r`, regard `vp`, arme en main `ar` |
-| `monde` | l'hôte | l'instantané complet, argent et armes compris (voir `normaliserMonde`) |
+| `monde` | l'hôte | l'instantané complet : zombies et leur type `k`, explosions de bouffis `ex`, argent et armes (voir `normaliserMonde`) |
 | `tirs` | le tireur | paquet de balles (100 ms) : trajectoires, et `m`, `dg` si un zombie est touché |
 | `grenade` | le tireur | départ et vitesse : chaque navigateur simule la même trajectoire |
 | `explosion` | le tireur | zombies touchés par sa grenade et dégâts |
@@ -44,6 +44,14 @@ amis, on fait confiance, l'hôte ne fait que borner les dégâts et crédite
 l'argent au tireur. Les achats sont validés par l'hôte (argent suffisant, joueur
 devant le comptoir `BOUTIQUE`). Si l'hôte part, le suivant appelle
 `sim.charger(dernier instantané)` et continue.
+
+Les bouffis explosent **chez l'hôte** (au contact du poteau, ou abattus) : la
+simulation compte les dégâts, réaction en chaîne comprise, et range
+l'explosion dans `ex` pendant 1,5 s avec un numéro. Chaque navigateur la
+montre une fois (`explosionsVues` dans `jeu.js`).
+
+Chargeurs, rechargement et recul ne concernent que le tireur : rien ne passe
+par le réseau ni par l'hôte.
 
 Les tirs partent **par paquets** : un Uzi tire 14 balles par seconde, un
 message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
@@ -56,7 +64,7 @@ message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
 | `src/main.js` | écrans (création, jeu, édition), connexion au salon, boucle de rendu |
 | `src/jeu.js` | une partie côté navigateur : rôles, tirs, poteau, lanterne, messages, interface de jeu |
 | `src/simulation.js` | la partie chez l'hôte, sans Three.js : testable dans Node |
-| `src/regles.js` | réglages, tirage du protégé, test de tir `premierTouche`, position du poteau porté |
+| `src/regles.js` | réglages (armes, types de zombies…), tirage du protégé, test de tir `premierTouche`, position du poteau porté |
 | `src/salon.js` | code du salon, ordre des joueurs, admission ou refus (4 maximum) |
 | `src/partie.js` | entrée dans un salon au-dessus d'un transport |
 | `src/reseau/` | transports : Supabase (en ligne) ou `BroadcastChannel` (onglets, sans configuration) |
@@ -67,10 +75,10 @@ message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
 | `src/armes.js` | modèles des 4 armes et de la grenade (profils extrudés, biseautés) |
 | `src/apercus.js` | vignettes des armes photographiées au démarrage, pour la boutique et la barre d'armes |
 | `src/projectiles.js` | grenades en vol, découpées en pas de 20 ms |
-| `src/monstres.js` | zombies à l'écran : 6 maillages chacun, géométries partagées |
+| `src/monstres.js` | zombies à l'écran, 4 silhouettes et allures : 6 maillages chacun, géométries partagées |
 | `src/poteau.js` | mât, cordes, lanterne orientable, mannequin de paille |
-| `src/arme.js` | arme à la première personne (mains, changement d'arme), éclairs, traînées, explosions |
-| `src/vue.js` | souris verrouillée, regard à la première personne |
+| `src/arme.js` | arme à la première personne (mains, changement d'arme, rechargement), éclairs, traînées, explosions |
+| `src/vue.js` | souris verrouillée, regard à la première personne, recul |
 | `src/joueur.js` | clavier et déplacements |
 | `src/avatars.js` | les autres joueurs : modèles, étiquettes, lissage |
 | `src/camera.js` | caméra en orbite de l'écran de création |
@@ -83,16 +91,19 @@ npm test
 ```
 
 `node:test` couvre la simulation (manches, défaite, tirage, poteau,
-Illumination, argent, achats, contournement des obstacles, reprise par un
-nouvel hôte), les règles, le salon et un salon
+Illumination, argent, achats, types de zombies, explosions de bouffis en
+chaîne, contournement des obstacles, reprise par un nouvel hôte), les règles,
+le salon et un salon
 complet sur `BroadcastChannel` (qui existe dans Node). Aucun test n'appelle
 Supabase.
 
 Le jeu lui-même ne se vérifie qu'avec Playwright, dans Chromium lancé avec
 `--use-angle=swiftshader --enable-unsafe-swiftshader`. Ouvrir l'adresse avec
-`?debug` expose `window.leProtege` : `etat()`, `viser(x, y, z)`,
-`teleporter(x, z)`, `crediter(n, id)` (hôte), `acheter(id)`, `equiper(id)`,
-`boutique()`. Pièges :
+`?debug` expose `window.leProtege` : `etat()` (munitions et `progression` du
+rechargement comprises), `viser(x, y, z)`, `teleporter(x, z)`, `acheter(id)`,
+`equiper(id)`, `recharger()`, `boutique()`, et pour l'hôte `crediter(n, id)`,
+`illuminer()` et `poserZombie(type, x, z, vitesse, pv)` (immobile par défaut :
+pratique pour photographier un modèle). Pièges :
 - `#hud` mesure 0×0 (enfants en `position: fixed`) : attendre `#hud .salon`.
 - Cliquer sur une zone libre de la scène : dans une petite fenêtre, le centre
   tombe sur la carte du salon et la souris n'est jamais verrouillée.
@@ -126,6 +137,14 @@ Le jeu lui-même ne se vérifie qu'avec Playwright, dans Chromium lancé avec
   `RoomEnvironment` ; en jeu, le métal garde une faible `metalness` et une
   lumière d'appoint accrochée à la caméra éclaire l'arme en main la nuit.
 - La barre d'armes est à gauche : à droite, elle recouvrait l'arme en main.
+- Recul : `vue.etat.lacet`/`tangage` sont le regard voulu par la souris (il
+  oriente le corps et les pas) ; `vue.lacet`/`vue.tangage` y ajoutent le recul
+  (caméra et tirs). Ne pas écrire le recul dans `vue.etat`, il ne reviendrait
+  plus.
+- Zone de tir d'un zombie : un cylindre droit (`premierTouche`, agrandi par
+  `largeur`/`hauteur` du type). Un modèle voûté (le coureur) est penché
+  depuis les hanches avec le bassin reculé (`incliner` dans `monstres.js`) :
+  la tête doit rester au-dessus des pieds, sinon on la vise sans la toucher.
 - Étiquettes CSS2D : retirer l'étiquette elle-même (`removeFromParent`) pour
   que son élément quitte le DOM.
 - Supabase : redéclarer la présence (`track`) à chaque `SUBSCRIBED`.

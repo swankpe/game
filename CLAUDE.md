@@ -99,7 +99,9 @@ message par balle épuiserait le quota Supabase. Les autres rejouent le paquet
 | `src/chateau.js` | la cour du château : blocs et rampes (carte de hauteurs), obstacles, sorties, sans Three.js |
 | `src/navigation.js` | champ de distances (Dijkstra sur une grille de 1 m) : les zombies passent les portes et prennent les rampes |
 | `src/rendu-chateau.js` | rendu de la cour (mêmes blocs que la carte) : lierre, fissures, meurtrières, fenêtres éclairées, cimetière, arbres morts |
-| `src/ile.js` | rendu de l'île (barque échouée, torches, écume, fleurs…), ciel (halo de lune, nuages, étoiles filantes), ambiances, bascule d'une carte à l'autre |
+| `src/environs-chateau.js` | la cour meublée (marché, forge, mannequins, braseros…) et ses environs hors d'atteinte : chemins, clôtures, village, moulin, chapelle, forêt |
+| `src/vegetation.js` | herbes hautes, buissons, sapins, feuillus, bananiers : un `InstancedMesh` par espèce, ondulant au vent dans le shader |
+| `src/ile.js` | rendu de l'île (végétation, camp, tour de guet, réverbères, barque, écume, îlots…), ciel (halo de lune, nuages, étoiles filantes), ambiances (jour, crépuscule de la préparation, nuit, Illumination), bascule d'une carte à l'autre |
 | `src/ambiance.js` | vie de la nuit : lucioles, braises des torches, brume au ras du sol |
 | `src/post.js` | post-traitement : halo lumineux (bloom) réglé sur `ile.jour`, vignettage, étalonnage de nuit, grain |
 | `src/particules.js` | sang, bave, poussière, étincelles, fumée, douilles, flaques : réserves fixes d'`InstancedMesh` |
@@ -246,6 +248,17 @@ Pièges :
   Le test « contourne la cabane » le vérifie.
 - Les fenêtres des tours, les torches et les braises n'éclairent rien : ce
   sont des matières lumineuses, pas des lumières (nombre de lumières constant).
+- **Végétation** : des milliers de touffes d'herbe, c'est un `InstancedMesh`
+  par espèce, jamais un maillage par plante. Le vent est dans le shader
+  (`onBeforeCompile`, phase tirée de `instanceMatrix`) : rien à recalculer
+  en JavaScript. Les brins ont des normales vers le haut (sinon une face sur
+  deux est noire) et pas de `flatShading`, qui les ignorerait. Ce qui est
+  au-delà des bornes ne projette pas d'ombre (`creerVegetation(…, { ombres:
+  false })`) : il serait dessiné une seconde fois pour rien.
+- Arbres, tour de guet, camp, réverbères de l'île sont dans `DECOR` (et dans
+  les obstacles) ; herbes et buissons ne bloquent rien et sont tirés au
+  rendu, par `hachage`. Le test « de tous les côtés de l'île » vérifie qu'un
+  zombie parti de la mer atteint toujours le poteau.
 - Le linteau des portes du château est un décor sans relief : la carte de
   hauteurs ne le connaît pas (sinon le passage serait bouché) ; il est posé
   assez haut pour que le boss passe dessous.

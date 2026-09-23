@@ -11,10 +11,11 @@ lien.
   chaque manche.
 - **Chaque manche a sa carte** : la manche 1 sur l'île, la 2 dans la cour d'un
   château, puis on alterne.
-- **Préparation** : chaque manche commence par 30 secondes sans zombie pour
-  acheter ses armes et, surtout, **placer le poteau** au meilleur endroit
-  pour la lumière et la protection. Chacun appuie sur **Entrée** quand il est
-  prêt : tout le monde prêt, la manche commence sans attendre.
+- **Préparation** : chaque manche commence au crépuscule, par 30 secondes
+  sans zombie pour acheter ses armes et, surtout, **placer le poteau** au
+  meilleur endroit pour la lumière et la protection. Chacun appuie sur
+  **Entrée** quand il est prêt : tout le monde prêt, la nuit tombe et la
+  manche commence.
 - **Manche de 5 minutes**. Les zombies arrivent de plus en plus vite pendant
   la manche (2,5 fois plus à la fin qu'au début), et chaque manche en amène
   davantage, plus rapides et plus résistants. Au bout des 5 minutes, **le boss**
@@ -214,8 +215,9 @@ remplis les deux valeurs.
 - **Tout est dessiné par le code** : pas un modèle 3D, pas une texture, pas un
   son à télécharger. Les torches, les fenêtres des tours, les yeux des
   zombies et les étoiles rayonnent dans la nuit (halo lumineux) ; lucioles,
-  braises, brume, sang et douilles sont des particules. Sur une petite carte
-  graphique, c'est le halo qui coûte le plus.
+  braises, brume, sang et douilles sont des particules. Herbes hautes,
+  buissons et arbres (des milliers) ondulent au vent. Sur une petite carte
+  graphique, ce sont le halo et la végétation qui coûtent le plus.
 
 - **Qui fait tourner les zombies ?** Le navigateur du premier joueur du salon
   (l'hôte). S'il part, le suivant reprend la partie là où elle en était.

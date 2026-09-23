@@ -10,6 +10,7 @@ import { creerModeleArme } from './armes.js';
 import {
   BLOCS, BOUTIQUE, COUR, DEMI_PORTE, EPAISSEUR_MUR, ETAL, H_PARAPET, H_RONDE, H_TERRASSE, H_TOUR, OBSTACLES, RAMPES, TERRASSE, TOURS,
 } from './chateau.js';
+import { creerEnvirons, meublerCour } from './environs-chateau.js';
 import { colorer, fusionner, hachage, lumineux, place } from './geometrie.js';
 
 const PIERRES = ['#8b857a', '#7f796f', '#958f84', '#77726a', '#8f887c'];
@@ -478,7 +479,15 @@ export function creerChateau() {
   }
   for (const s of [-1, 1]) for (const c of [-1, 1]) torches.push([s * (TERRASSE.x1 - 0.3), H_TERRASSE + 1, c * (TERRASSE.z1 - 0.3)]);
   for (const c of [-1, 1]) torches.push([c * (DEMI_PORTE + 0.4), 3, COUR - 0.5], [c * (DEMI_PORTE + 0.4), 3, -COUR + 0.5], [-COUR + 0.5, 3, c * (DEMI_PORTE + 0.4)]);
+  // La cour meublée : ses braseros brûlent comme les torches, la forge et
+  // eux lâchent des braises.
+  const charbons = [];
+  const cour = meublerCour({ pierre, bois, fer, tissu, paille, feuilles, braises: charbons });
   const flammes = [], halos = [];
+  for (const [x, y, z] of cour.flammes) {
+    for (const [dx, dz, t] of [[0, 0, 1], [0.12, 0.08, 0.7], [-0.1, 0.1, 0.65], [0.02, -0.13, 0.7]]) flammes.push(place(new THREE.ConeGeometry(0.16 * t, 0.5 * t, 5), { x: x + dx, y: y + 0.2 * t, z: z + dz }));
+    halos.push(x, y + 0.25, z);
+  }
   for (const [x, y, z] of torches) {
     bois.push(colorer(place(new THREE.CylinderGeometry(0.05, 0.04, 0.8, 5), { x, y: y + 0.4, z }), BOIS[0]));
     fer.push(colorer(place(new THREE.CylinderGeometry(0.11, 0.07, 0.14, 6), { x, y: y + 0.82, z }), '#2c2e33'));
@@ -495,11 +504,15 @@ export function creerChateau() {
   const lueurs = new THREE.Points(geoHalos, matHalos);
   // Des braises montent des torches ; la brume traîne dans le champ.
   const vie = [
-    creerBraises(torches.map(([x, y, z]) => [x, y + 1.1, z]), 70),
+    creerBraises([...torches.map(([x, y, z]) => [x, y + 1.1, z]), ...cour.foyers], 90),
     creerBrume({ n: 40, rayon: 34, carre: true, sol: () => 0 }),
   ];
   groupe.add(...vie);
 
+  // Le village, la forêt et le champ, au-delà des murailles.
+  const environs = creerEnvirons();
+  fenetres.push(...environs.fenetres);
+  groupe.add(environs.groupe, new THREE.Mesh(fusionnerFlammes(charbons), new THREE.MeshBasicMaterial({ color: lumineux('#ff5a1f', 4), fog: false })));
   const maillages = [
     fusionner(pierre), fusionner(bois), fusionner(fer, { metalness: 0.4, roughness: 0.5 }), fusionner(ardoises), fusionner(tissu, { side: THREE.DoubleSide }),
     fusionner(paille), fusionner(herbe, { ombre: false }), fusionner(feuilles, { ombre: false, side: THREE.DoubleSide }),
@@ -529,10 +542,13 @@ export function creerChateau() {
   groupe.userData.animer = (dt, nuit) => {
     temps += dt;
     for (const v of vie) v.userData.animer(dt, nuit);
+    environs.rotor.rotation.z += dt * 0.35;
     // Les flammes vacillent (toutes ensemble : une seule matière).
     const v = 0.85 + Math.sin(temps * 13) * 0.08 + Math.sin(temps * 7.3) * 0.07;
     matFlamme.color.setRGB(1, 0.62 + v * 0.1, 0.25 + v * 0.05).multiplyScalar(7);
     matHalos.size = 1.25 + v * 0.3;
+    // Le jour, le halo s'efface : il ne se voit que dans la pénombre.
+    matHalos.opacity = 0.15 + 0.85 * nuit;
   };
   return groupe;
 }

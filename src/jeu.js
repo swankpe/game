@@ -1361,7 +1361,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       for (const { position, locale } of projectiles.mettreAJour(dt, monstres.cibles())) exploser(position, locale);
       envoyerTirs();
 
-      ile.ambiance(monde.phase === 'attente' ? 'jour' : monde.illumination > 0 ? 'illumination' : 'nuit');
+      ile.ambiance(monde.phase === 'attente' ? 'jour' : monde.illumination > 0 ? 'illumination' : monde.phase === 'preparation' ? 'crepuscule' : 'nuit');
       if (fps || r === 'protege') envoyerEtat(false);
       afficherInterface(dt);
     },

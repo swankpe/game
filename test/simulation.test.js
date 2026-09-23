@@ -7,7 +7,7 @@ import {
   degatsExplosion, indiceArme, indiceType, monstresParMinute, poidsTypes, positionPortee, premierTouche, pvBoss,
   pvMonstre, renfortsBoss, tirerProtege, tirerType, vitesseMonstre,
 } from '../src/regles.js';
-import { BOUTIQUE, CABANE, CARTES, estPraticable, resoudreCollisions } from '../src/monde.js';
+import { BOUTIQUE, CABANE, CARTES, estPraticable, rayonIle, resoudreCollisions } from '../src/monde.js';
 
 const graine = (n) => () => {
   n = (n * 16807) % 2147483647;
@@ -259,6 +259,19 @@ test('un zombie coincé derrière la cabane la contourne et atteint le poteau', 
   avancer(sim, 40);
   const m = s.monstres[0];
   assert.ok(Math.hypot(m.x - s.poteau.x, m.z - s.poteau.z) < 2, `arrivé au poteau (${m.x.toFixed(1)}, ${m.z.toFixed(1)})`);
+});
+
+test('de tous les côtés de l’île, un zombie traverse arbres, camp et tour de guet jusqu’au poteau', () => {
+  for (let k = 0; k < 16; k++) {
+    const sim = lancer();
+    const s = sim.etat;
+    s.cumul = -1e9;
+    const a = (k / 16) * Math.PI * 2, r = rayonIle(a) * 1.1;
+    s.monstres = [{ id: 999, k: 0, x: Math.cos(a) * r, z: Math.sin(a) * r, r: 0, pv: 30, v: 1, a: false, c: 1 }];
+    avancer(sim, 60);
+    const m = s.monstres[0];
+    assert.ok(Math.hypot(m.x - s.poteau.x, m.z - s.poteau.z) < 2, `parti de l’angle ${a.toFixed(2)}, arrêté en (${m.x.toFixed(1)}, ${m.z.toFixed(1)})`);
+  }
 });
 
 test('chaque zombie tué rapporte au tireur, pas aux autres, selon son type', () => {

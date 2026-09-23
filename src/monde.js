@@ -205,7 +205,65 @@ function genererDecor() {
     coquillages.push({ x, z, genre: alea() < 0.25 ? 'etoile' : 'coquille', teinte: alea(), rotation: alea() * Math.PI * 2, taille: 0.7 + alea() * 0.6 });
   }
 
-  return { palmiers, rochers, touffes, epave, bois, torches, caisses, plantes, coquillages };
+  // De quoi remplir l'île. Le poteau part de (6, -3) : on lui laisse de la
+  // place, et aux abords de l'armurerie et de l'arrivée.
+  const POTEAU_ILE = { x: 6, z: -3 };
+  const degage = (x, z, marge) => libre(x, z, marge) && Math.hypot(x - POTEAU_ILE.x, z - POTEAU_ILE.z) > 6.5
+    && Math.hypot(x - BOUTIQUE.x, z - BOUTIQUE.z) > 3 && loinDe(x, z, torches, 1.5) && loinDe(x, z, caisses, 1.5)
+    && (!epave || Math.hypot(x - epave.x, z - epave.z) > 3);
+  // Le camp des naufragés : un feu de camp, une tente, des totems.
+  let camp = null;
+  for (let essai = 0; !camp && essai < 300; essai++) {
+    const angle = 0.9 + alea() * 1.4, t = 0.38 + alea() * 0.2;
+    const r = rayonIle(angle) * t, x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+    if (degage(x, z, 4)) camp = { x, z, tente: angle + Math.PI + (alea() - 0.5) * 0.5 };
+  }
+  // La tour de guet, sur pilotis, au sud.
+  let tour = null;
+  for (let essai = 0; !tour && essai < 300; essai++) {
+    const angle = 4.4 + alea() * 1, t = 0.55 + alea() * 0.15;
+    const r = rayonIle(angle) * t, x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+    if (degage(x, z, 3.5) && (!camp || Math.hypot(x - camp.x, z - camp.z) > 8)) tour = { x, z, rotation: angle };
+  }
+  // Réverbères (lanternes pendues à une potence) le long du chemin de
+  // l'arrivée à l'armurerie, un panneau indicateur, des filets à sécher.
+  const reverberes = [[12, 3.5], [1, 4.2], [-6.5, -0.8], [-3, -9.5]].map(([x, z]) => ({ x, z }));
+  const panneau = { x: 11.5, z: -4.2 };
+  const filets = { x: PONTON.x0 - 2.2, z: 4.2 };
+  const occupe = [...(camp ? [camp] : []), ...(tour ? [tour] : []), ...reverberes, panneau, filets];
+  // Encore des palmiers sur la plage, des feuillus et des bananiers dans les
+  // terres, des buissons partout.
+  for (let essai = 0; palmiers.length < 30 && essai < 800; essai++) {
+    const angle = alea() * Math.PI * 2, t = 0.55 + alea() * 0.35;
+    const r = rayonIle(angle) * t, x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+    if (!degage(x, z, 2.5) || !loinDe(x, z, palmiers, 3.5) || !loinDe(x, z, occupe, 4)) continue;
+    palmiers.push({ x, z, hauteur: 5 + alea() * 3, inclinaison: 0.25 + alea() * 0.3, direction: angle + (alea() - 0.5) * 0.8, rotation: alea() * Math.PI * 2 });
+  }
+  const arbres = [];
+  for (let essai = 0; arbres.length < 26 && essai < 1500; essai++) {
+    const angle = alea() * Math.PI * 2, t = 0.22 + alea() * 0.5;
+    const r = rayonIle(angle) * t, x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+    if (!degage(x, z, 2.2) || !loinDe(x, z, palmiers, 2.5) || !loinDe(x, z, arbres, 3.2) || !loinDe(x, z, occupe, 4)) continue;
+    arbres.push({ x, z, espece: alea() < 0.55 ? 'feuillu' : 'bananier', taille: 0.8 + alea() * 0.5, rotation: alea() * Math.PI * 2 });
+  }
+  const buissons = [];
+  for (let essai = 0; buissons.length < 90 && essai < 2000; essai++) {
+    const angle = alea() * Math.PI * 2, t = 0.15 + alea() * 0.75;
+    const r = rayonIle(angle) * t, x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+    if (!degage(x, z, 1) || !loinDe(x, z, buissons, 1.6) || !loinDe(x, z, occupe, 3)) continue;
+    buissons.push({ x, z, taille: 0.6 + alea() * 0.7, rotation: alea() * Math.PI * 2, sombre: alea() < 0.4 });
+  }
+  // Îlots au loin, pour meubler l'horizon.
+  const ilots = [];
+  for (let k = 0; k < 6; k++) {
+    const angle = (k / 6) * Math.PI * 2 + 0.4 + alea() * 0.5, d = 120 + alea() * 90;
+    ilots.push({ x: Math.cos(angle) * d, z: Math.sin(angle) * d, taille: 6 + alea() * 10, palmiers: 2 + Math.floor(alea() * 4) });
+  }
+
+  return {
+    palmiers, rochers, touffes, epave, bois, torches, caisses, plantes, coquillages,
+    camp, tour, arbres, buissons, reverberes, panneau, filets, ilots,
+  };
 }
 
 export const DECOR = genererDecor();
@@ -214,6 +272,16 @@ const OBSTACLES = [
   ...DECOR.palmiers.map((p) => ({ x: p.x, z: p.z, rayon: 0.3 })),
   ...DECOR.rochers.filter((r) => r.taille > 0.55).map((r) => ({ x: r.x, z: r.z, rayon: r.taille * 0.85 })),
   ...DECOR.torches.map((t) => ({ x: t.x, z: t.z, rayon: 0.15 })),
+  ...DECOR.arbres.map((a) => ({ x: a.x, z: a.z, rayon: 0.3 * a.taille })),
+  ...DECOR.reverberes.map((r) => ({ x: r.x, z: r.z, rayon: 0.12 })),
+  { x: DECOR.panneau.x, z: DECOR.panneau.z, rayon: 0.12 },
+  ...[-1, 1].map((c) => ({ x: DECOR.filets.x, z: DECOR.filets.z + c * 1.3, rayon: 0.1 })),
+  // Le feu de camp et la tente ; les quatre pieds de la tour de guet.
+  ...(DECOR.camp ? [
+    { x: DECOR.camp.x, z: DECOR.camp.z, rayon: 0.7 },
+    { x: DECOR.camp.x + Math.cos(DECOR.camp.tente) * 3.2, z: DECOR.camp.z + Math.sin(DECOR.camp.tente) * 3.2, rayon: 1.3 },
+  ] : []),
+  ...(DECOR.tour ? [[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([a, b]) => ({ x: DECOR.tour.x + a * 1.2, z: DECOR.tour.z + b * 1.2, rayon: 0.14 })) : []),
   ...DECOR.caisses.map((c) => ({ x: c.x, z: c.z, rayon: 0.75 })),
   // La barque : une gélule le long de sa quille (deux cercles qui se
   // chevauchent se renverraient le joueur de l'un à l'autre).

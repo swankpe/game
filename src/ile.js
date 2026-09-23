@@ -8,8 +8,9 @@ import * as THREE from 'three';
 import { creerBraises, creerBrume, creerLucioles } from './ambiance.js';
 import { creerModeleArme } from './armes.js';
 import { colorer, fusionner, hachage, lumineux, place } from './geometrie.js';
-import { CABANE, CARTES, DECOR, PONTON, estHerbe, hauteurTerrain, rayonIle } from './monde.js';
+import { CABANE, CARTES, DECOR, PONTON, distanceRelative, estHerbe, hauteurTerrain, rayonIle, surPonton } from './monde.js';
 import { caisses, creerChateau } from './rendu-chateau.js';
+import { creerVegetation, souffler } from './vegetation.js';
 
 const TEINTES = {
   herbe: '#8dba58',
@@ -122,14 +123,14 @@ function geometriePalme(longueur) {
   return geo;
 }
 
-function creerPalmiers() {
+function creerPalmiers(liste = DECOR.palmiers, sol = hauteurTerrain) {
   const troncs = [], palmes = [], noix = [];
   const haut = new THREE.Vector3(0, 1, 0);
-  for (const [indice, p] of DECOR.palmiers.entries()) {
+  for (const [indice, p] of liste.entries()) {
     const segments = 7;
     const longueur = p.hauteur / segments;
     const penche = new THREE.Vector3(Math.cos(p.direction), 0, Math.sin(p.direction));
-    let point = new THREE.Vector3(p.x, hauteurTerrain(p.x, p.z) - 0.2, p.z);
+    let point = new THREE.Vector3(p.x, sol(p.x, p.z) - 0.2, p.z);
     let direction = haut.clone();
     for (let s = 0; s < segments; s++) {
       const f = (s + 1) / segments;
@@ -328,7 +329,7 @@ function creerBouees() {
 
 // La barque échouée : un demi-tube effilé aux deux bouts, couché sur le
 // flanc et à moitié ensablé, ses membrures, ses bancs, une rame à côté.
-function creerEpave(e) {
+function coqueBarque() {
   const long = 1.7, bois = [];
   const coque = new THREE.CylinderGeometry(0.75, 0.75, long * 2, 12, 10, true, Math.PI / 2, Math.PI).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
   const effiler = (x) => 1 - (x / long) ** 2 * 0.92;
@@ -349,6 +350,11 @@ function creerEpave(e) {
   for (const x of [-0.6, 0.65]) bois.push(colorer(place(new THREE.BoxGeometry(0.28, 0.05, 1.3 * effiler(x)), { x, y: -0.12 }), TEINTES.bois[1], 0.1));
   bois.push(colorer(place(new THREE.BoxGeometry(long * 2 + 0.1, 0.06, 0.08), { y: -0.44 }), TEINTES.boisSombre, 0.1));
   // Planches arrachées.
+  return { maillageCoque, bois };
+}
+
+function creerEpave(e) {
+  const { maillageCoque, bois } = coqueBarque();
   for (const [x, rz, ry] of [[1.35, 0.8, 0.3], [-1.45, -0.5, -0.4]]) bois.push(colorer(place(new THREE.BoxGeometry(0.7, 0.03, 0.12), { x, y: 0.05, z: 0.35, rz, ry }), '#8a7054', 0.1));
   const groupe = new THREE.Group();
   groupe.add(maillageCoque, fusionner(bois));
@@ -413,6 +419,8 @@ function creerTorchesTiki() {
     const v = 0.85 + Math.sin(temps * 12) * 0.08 + Math.sin(temps * 7.9) * 0.07;
     matFlamme.color.setRGB(1, 0.62 + v * 0.1, 0.25 + v * 0.05).multiplyScalar(7);
     matHalos.size = 1.25 + v * 0.3;
+    // Le jour, le halo s'efface : il ne se voit que dans la pénombre.
+    matHalos.opacity = 0.15 + 0.85 * nuit;
     braises.userData.animer(dt, nuit);
   };
   return groupe;
@@ -627,8 +635,250 @@ function creerCielNocturne(lune) {
   return groupe;
 }
 
-// Trois ambiances : le jour pour créer son perso, la nuit pendant les
-// manches, et l'Illumination du protégé qui éclaire toute la carte.
+// Herbes hautes, buissons, feuillus et bananiers : toute la végétation
+// basse de l'île, instanciée. Les herbes sont tirées sur une grille décalée
+// (hachage : la même île pour tous), denses dans l'herbe, rares sur le sable.
+function creerVegetationIle() {
+  const plantes = [];
+  const genes = [
+    ...DECOR.rochers.map((r) => ({ x: r.x, z: r.z, r: r.taille })),
+    ...DECOR.palmiers.map((p) => ({ x: p.x, z: p.z, r: 0.35 })),
+    ...DECOR.arbres.map((a) => ({ x: a.x, z: a.z, r: 0.4 })),
+    ...(DECOR.camp ? [{ x: DECOR.camp.x, z: DECOR.camp.z, r: 1.3 }, { x: DECOR.camp.x + Math.cos(DECOR.camp.tente) * 3.2, z: DECOR.camp.z + Math.sin(DECOR.camp.tente) * 3.2, r: 1.6 }] : []),
+    { x: 6, z: -3, r: 1.2 },
+  ];
+  const pas = 0.45;
+  for (let i = -70; i <= 70; i++) {
+    for (let j = -70; j <= 70; j++) {
+      const x = i * pas + (hachage(i, j) - 0.5) * pas, z = j * pas + (hachage(j + 31, i) - 0.5) * pas;
+      const h = hauteurTerrain(x, z);
+      if (h < 0.28 || surPonton(x, z)) continue;
+      if (Math.abs(x - CABANE.x) < CABANE.profondeur / 2 + 0.3 && Math.abs(z - CABANE.z) < CABANE.largeur / 2 + 0.3) continue;
+      const herbe = estHerbe(x, z), t = distanceRelative(x, z);
+      const chance = herbe ? 0.8 : t < 0.62 ? 0.14 : 0.035;
+      if (hachage(i * 3.1, j * 1.7) > chance) continue;
+      if (genes.some((g) => Math.hypot(g.x - x, g.z - z) < g.r)) continue;
+      plantes.push({
+        espece: herbe ? 'herbe' : 'herbeSeche', x, y: h - 0.03, z, rotation: hachage(i, j + 7) * 6.3,
+        echelle: 0.7 + hachage(j, i + 3) * 0.7, teinte: 0.85 + hachage(i + 5, j) * 0.3,
+      });
+    }
+  }
+  for (const b of DECOR.buissons) {
+    plantes.push({ espece: b.sombre ? 'buissonSombre' : 'buisson', x: b.x, y: hauteurTerrain(b.x, b.z) - 0.1, z: b.z, rotation: b.rotation, echelle: b.taille, teinte: 0.9 + hachage(b.x, b.z) * 0.2 });
+  }
+  for (const a of DECOR.arbres) {
+    plantes.push({ espece: a.espece, x: a.x, y: hauteurTerrain(a.x, a.z) - 0.1, z: a.z, rotation: a.rotation, echelle: a.taille, teinte: 0.9 + hachage(a.z, a.x) * 0.2 });
+  }
+  return creerVegetation(plantes);
+}
+
+// Des flammes qui brillent sans éclairer, un halo, des braises : pour le feu
+// de camp et les lanternes. foyers : [[x, y, z, taille]].
+function creerFeux(foyers, braisesParFoyer = 6) {
+  const flammes = [];
+  for (const [x, y, z, t] of foyers) {
+    flammes.push(place(new THREE.ConeGeometry(0.13 * t, 0.42 * t, 5), { x, y: y + 0.2 * t, z }));
+    if (t > 1.5) for (const [dx, dz] of [[0.18, 0.1], [-0.15, 0.12], [0.02, -0.18]]) flammes.push(place(new THREE.ConeGeometry(0.1 * t * 0.6, 0.35 * t * 0.6, 5), { x: x + dx * t * 0.5, y: y + 0.1 * t, z: z + dz * t * 0.5 }));
+  }
+  const matFlamme = new THREE.MeshBasicMaterial({ color: '#ffb347', fog: false });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(flammes.flatMap((g) => [...g.toNonIndexed().attributes.position.array]), 3));
+  const halos = new THREE.BufferGeometry();
+  halos.setAttribute('position', new THREE.Float32BufferAttribute(foyers.flatMap(([x, y, z, t]) => [x, y + 0.2 * t, z]), 3));
+  const matHalos = new THREE.PointsMaterial({
+    map: textureHalo(), color: new THREE.Color(1.8, 1.8, 1.8), size: 1.4, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+  });
+  const braises = creerBraises(foyers.map(([x, y, z, t]) => [x, y + 0.3 * t, z]), foyers.length * braisesParFoyer);
+  const groupe = new THREE.Group().add(new THREE.Mesh(geo, matFlamme), new THREE.Points(halos, matHalos), braises);
+  let temps = 0;
+  groupe.userData.animer = (dt, nuit) => {
+    temps += dt;
+    const v = 0.85 + Math.sin(temps * 11) * 0.08 + Math.sin(temps * 7.1) * 0.07;
+    matFlamme.color.setRGB(1, 0.62 + v * 0.1, 0.25 + v * 0.05).multiplyScalar(7);
+    matHalos.size = 1.3 + v * 0.35;
+    // Le jour, le halo s'efface : il ne se voit que dans la pénombre.
+    matHalos.opacity = 0.15 + 0.85 * nuit;
+    braises.userData.animer(dt, nuit);
+  };
+  return groupe;
+}
+
+const TOILE = '#d9cba3';
+
+// Le camp des naufragés : cercle de pierres, bûches, sièges, tente de toile,
+// totems sculptés. Rend { groupe, foyers } (foyers pour creerFeux).
+function creerCamp(c) {
+  const parties = [], toile = [];
+  const sol = (x, z) => hauteurTerrain(x, z);
+  const y = sol(c.x, c.z);
+  for (let k = 0; k < 9; k++) {
+    const a = (k / 9) * Math.PI * 2;
+    parties.push(colorer(place(new THREE.IcosahedronGeometry(0.16, 0), { x: c.x + Math.cos(a) * 0.55, y: y + 0.05, z: c.z + Math.sin(a) * 0.55, sy: 0.7 }), TEINTES.rochers[k % 3], 0.1));
+  }
+  for (let k = 0; k < 4; k++) {
+    parties.push(colorer(place(new THREE.CylinderGeometry(0.05, 0.06, 0.8, 5), { x: c.x, y: y + 0.18, z: c.z, rz: 1.1, ry: k * 0.8 }), k % 2 ? '#3a2a1c' : TEINTES.boisSombre, 0.1));
+  }
+  // Trois bûches pour s'asseoir autour.
+  for (let k = 0; k < 3; k++) {
+    const a = c.tente + 1.2 + k * 1.3, d = 1.7;
+    const x = c.x + Math.cos(a) * d, z = c.z + Math.sin(a) * d;
+    parties.push(colorer(place(new THREE.CylinderGeometry(0.18, 0.2, 1.1, 7), { x, y: sol(x, z) + 0.15, z, rz: Math.PI / 2, ry: -a + Math.PI / 2 }), '#7a5a3c', 0.12));
+  }
+  // La tente : deux pans de toile sur un faîtage, des piquets, des cordes.
+  const tx = c.x + Math.cos(c.tente) * 3.2, tz = c.z + Math.sin(c.tente) * 3.2, ty = sol(tx, tz);
+  // Le faîtage suit la direction du feu : l'entrée de la tente lui fait face.
+  const ry = -c.tente + Math.PI / 2;
+  const pan = (cote) => {
+    const g = new THREE.BoxGeometry(1.45, 0.03, 2.4);
+    g.rotateZ(cote * 0.95);
+    g.translate(cote * 0.52, 0.62, 0);
+    g.rotateY(ry);
+    g.translate(tx, ty, tz);
+    return colorer(g, cote > 0 ? TOILE : '#cbbd94', 0.08);
+  };
+  toile.push(pan(-1), pan(1));
+  for (const b of [-1.2, 1.2]) {
+    const g = new THREE.CylinderGeometry(0.03, 0.03, 1.35, 5);
+    g.translate(0, 0.67, b);
+    g.rotateY(ry);
+    g.translate(tx, ty, tz);
+    parties.push(colorer(g, TEINTES.boisSombre));
+  }
+  const faite = new THREE.CylinderGeometry(0.025, 0.025, 2.6, 5).rotateX(Math.PI / 2).translate(0, 1.3, 0).rotateY(ry).translate(tx, ty, tz);
+  parties.push(colorer(faite, TEINTES.boisSombre));
+  // Un sac et une caisse devant la tente, une lanterne posée.
+  const [dx, dz] = [Math.cos(c.tente + Math.PI), Math.sin(c.tente + Math.PI)];
+  parties.push(colorer(place(new THREE.IcosahedronGeometry(0.28, 1), { x: tx + dx * 1.7 + dz * 0.7, y: sol(tx, tz) + 0.22, z: tz + dz * 1.7 - dx * 0.7, sy: 0.8 }), '#8a7a58', 0.1));
+  parties.push(colorer(place(new THREE.BoxGeometry(0.5, 0.4, 0.4), { x: tx + dx * 1.6 - dz * 0.8, y: sol(tx, tz) + 0.2, z: tz + dz * 1.6 + dx * 0.8, ry }), TEINTES.bois[1], 0.1));
+  // Totems : des poteaux sculptés de visages, plantés en arc.
+  for (let k = 0; k < 2; k++) {
+    const a = c.tente + Math.PI + (k ? 0.9 : -0.9), x = c.x + Math.cos(a) * 3.3, z = c.z + Math.sin(a) * 3.3, y0 = sol(x, z);
+    for (let e = 0; e < 3; e++) {
+      const h = y0 + 0.45 + e * 0.8;
+      parties.push(colorer(place(new THREE.BoxGeometry(0.5, 0.78, 0.45), { x, y: h, z, ry: -a }), ['#8a5a3a', '#6e4a30', '#9a6a42'][e], 0.08));
+      for (const cote of [-1, 1]) parties.push(colorer(place(new THREE.BoxGeometry(0.1, 0.1, 0.05), { x: x - Math.cos(a) * 0.23 + Math.sin(a) * cote * 0.11, y: h + 0.12, z: z - Math.sin(a) * 0.23 - Math.cos(a) * cote * 0.11, ry: -a }), e === 1 ? '#e8d27a' : '#1c1410'));
+      parties.push(colorer(place(new THREE.BoxGeometry(0.28, 0.08, 0.05), { x: x - Math.cos(a) * 0.23, y: h - 0.15, z: z - Math.sin(a) * 0.23, ry: -a }), '#c8453a'));
+    }
+    parties.push(colorer(place(new THREE.BoxGeometry(0.9, 0.12, 0.2), { x, y: y0 + 2.5, z, ry: -a }), '#6e4a30', 0.1));
+  }
+  return { groupe: new THREE.Group().add(fusionner(parties), fusionner(toile, { side: THREE.DoubleSide })), foyers: [[c.x, y + 0.1, c.z, 2.2]] };
+}
+
+// Tour de guet sur pilotis : quatre pieds, des croisillons, une plate-forme à
+// garde-corps, un toit de palmes, une échelle.
+function creerTourDeGuet(t) {
+  const parties = [], chaume = [];
+  const y0 = Math.min(...[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([a, b]) => hauteurTerrain(t.x + a * 1.2, t.z + b * 1.2)));
+  const plancher = y0 + 3.4;
+  const pose = (geo, x, y, z, ry = 0) => {
+    geo.rotateY(ry);
+    geo.translate(x, y, z);
+    geo.rotateY(t.rotation);
+    geo.translate(t.x, 0, t.z);
+    return geo;
+  };
+  for (const [a, b] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+    parties.push(colorer(pose(new THREE.CylinderGeometry(0.1, 0.13, plancher - y0 + 2.2, 6), a * 1.2, (y0 + plancher + 2.2) / 2 - 0.3, b * 1.2), TEINTES.boisSombre, 0.1));
+  }
+  // Croisillons sur deux faces.
+  for (const b of [-1, 1]) {
+    for (const s of [-1, 1]) {
+      const g = new THREE.BoxGeometry(0.07, 3.3, 0.07).rotateZ(s * 0.62);
+      parties.push(colorer(pose(g, 0, y0 + 1.7, b * 1.2), TEINTES.bois[2], 0.1));
+      const h = new THREE.BoxGeometry(0.07, 3.3, 0.07).rotateX(s * 0.62);
+      parties.push(colorer(pose(h, b * 1.2, y0 + 1.7, 0), TEINTES.bois[2], 0.1));
+    }
+  }
+  for (let k = 0; k < 7; k++) parties.push(colorer(pose(new THREE.BoxGeometry(2.8, 0.08, 0.38), 0, plancher, -1.2 + k * 0.4), TEINTES.bois[k % 3], 0.08));
+  for (const b of [-1, 1]) {
+    parties.push(colorer(pose(new THREE.BoxGeometry(2.6, 0.07, 0.07), 0, plancher + 0.9, b * 1.25), TEINTES.bois[0], 0.08));
+    parties.push(colorer(pose(new THREE.BoxGeometry(0.07, 0.07, 2.6), b * 1.25, plancher + 0.9, 0), TEINTES.bois[0], 0.08));
+    for (let k = -2; k <= 2; k++) parties.push(colorer(pose(new THREE.BoxGeometry(0.05, 0.9, 0.05), k * 0.55, plancher + 0.45, b * 1.25), TEINTES.bois[1], 0.08));
+  }
+  // Toit à quatre pans de palmes, et son bord effrangé.
+  chaume.push(colorer(pose(new THREE.ConeGeometry(2.3, 1.2, 4), 0, plancher + 2.55, 0, Math.PI / 4), '#b89a58', 0.15));
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2;
+    chaume.push(colorer(pose(new THREE.BoxGeometry(0.4, 0.35, 0.03), Math.cos(a) * 1.55, plancher + 1.85, Math.sin(a) * 1.55, -a + Math.PI / 2), '#a88a4c', 0.2));
+  }
+  // Échelle.
+  for (const c of [-0.25, 0.25]) parties.push(colorer(pose(new THREE.BoxGeometry(0.06, 3.9, 0.06).rotateX(-0.25), c, y0 + 1.8, 1.7), TEINTES.bois[0]));
+  for (let k = 0; k < 9; k++) parties.push(colorer(pose(new THREE.BoxGeometry(0.5, 0.05, 0.05), 0, y0 + 0.3 + k * 0.4, 2.12 - k * 0.1), TEINTES.bois[1]));
+  // Une lanterne pendue sous le toit, au centre.
+  return { groupe: new THREE.Group().add(fusionner(parties), fusionner(chaume, { side: THREE.DoubleSide })), foyers: [[t.x, plancher + 1.5, t.z, 0.7]] };
+}
+
+// Réverbères : une potence et une lanterne. Rend { groupe, foyers }.
+function creerReverberes() {
+  const parties = [], foyers = [];
+  for (const [i, r] of DECOR.reverberes.entries()) {
+    const y = hauteurTerrain(r.x, r.z), a = hachage(i, 3) * Math.PI * 2;
+    const [dx, dz] = [Math.cos(a) * 0.55, Math.sin(a) * 0.55];
+    parties.push(colorer(place(new THREE.CylinderGeometry(0.06, 0.09, 2.6, 6), { x: r.x, y: y + 1.3, z: r.z }), TEINTES.boisSombre, 0.1));
+    parties.push(colorer(place(new THREE.BoxGeometry(0.7, 0.07, 0.07), { x: r.x + dx / 2, y: y + 2.5, z: r.z + dz / 2, ry: -a }), TEINTES.boisSombre));
+    parties.push(colorer(place(new THREE.CylinderGeometry(0.1, 0.12, 0.05, 6), { x: r.x + dx, y: y + 2.2, z: r.z + dz }), '#2c2e33'));
+    parties.push(colorer(place(new THREE.ConeGeometry(0.13, 0.12, 6), { x: r.x + dx, y: y + 2.46, z: r.z + dz }), '#2c2e33'));
+    parties.push(colorer(place(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 3), { x: r.x + dx, y: y + 2.46, z: r.z + dz }), '#2c2e33'));
+    foyers.push([r.x + dx, y + 2.18, r.z + dz, 0.55]);
+  }
+  // Le panneau indicateur : trois flèches de bois.
+  const p = DECOR.panneau, yp = hauteurTerrain(p.x, p.z);
+  parties.push(colorer(place(new THREE.CylinderGeometry(0.06, 0.07, 2.2, 6), { x: p.x, y: yp + 1.1, z: p.z }), TEINTES.boisSombre));
+  for (const [k, a] of [0.3, 2.5, 4.4].entries()) {
+    const g = new THREE.BoxGeometry(0.9, 0.2, 0.05).translate(0.4, 0, 0);
+    g.rotateY(a);
+    g.translate(p.x, yp + 1.85 - k * 0.3, p.z);
+    parties.push(colorer(g, TEINTES.bois[k % 3], 0.1));
+    const pointe = new THREE.ConeGeometry(0.1, 0.18, 3).rotateZ(-Math.PI / 2).scale(1, 1, 0.3).translate(0.94, 0, 0);
+    pointe.rotateY(a);
+    pointe.translate(p.x, yp + 1.85 - k * 0.3, p.z);
+    parties.push(colorer(pointe, TEINTES.bois[k % 3], 0.1));
+  }
+  // Filets de pêche tendus entre deux perches, avec leurs flotteurs.
+  const f = DECOR.filets, yf = hauteurTerrain(f.x, f.z);
+  for (const c of [-1, 1]) parties.push(colorer(place(new THREE.CylinderGeometry(0.05, 0.06, 2.2, 5), { x: f.x, y: yf + 1.1, z: f.z + c * 1.3 }), TEINTES.boisSombre));
+  for (let k = 0; k < 7; k++) parties.push(colorer(place(new THREE.BoxGeometry(0.012, 0.012, 2.6), { x: f.x, y: yf + 0.6 + k * 0.22, z: f.z }), '#6a6250'));
+  for (let k = 0; k < 11; k++) parties.push(colorer(place(new THREE.BoxGeometry(0.012, 1.35 - Math.abs(k - 5) * 0.03, 0.012), { x: f.x, y: yf + 1.26, z: f.z - 1.25 + k * 0.25 }), '#6a6250'));
+  for (let k = 0; k < 6; k++) parties.push(colorer(place(new THREE.IcosahedronGeometry(0.06, 0), { x: f.x + 0.02, y: yf + 1.95, z: f.z - 1.1 + k * 0.44 }), k % 2 ? '#d8443a' : '#f5f2ea'));
+  return { groupe: fusionner(parties), foyers };
+}
+
+// Barque amarrée au bout du ponton, qui danse sur l'eau.
+function creerBarqueAmarree() {
+  const { maillageCoque, bois } = coqueBarque();
+  bois.push(colorer(place(new THREE.CylinderGeometry(0.03, 0.03, 2, 5), { x: 0.2, y: 0.02, z: 0.3, rz: Math.PI / 2, ry: 0.15 }), TEINTES.bois[0]));
+  const barque = new THREE.Group().add(maillageCoque, fusionner(bois));
+  barque.position.set(PONTON.x1 - 1.5, 0.15, PONTON.z + PONTON.largeur / 2 + 1.1);
+  barque.userData.animer = (t) => {
+    barque.position.y = 0.2 + Math.sin(t * 1.2) * 0.08;
+    barque.rotation.set(Math.sin(t * 0.9) * 0.06, 0.1, Math.sin(t * 1.1 + 1) * 0.05);
+  };
+  return barque;
+}
+
+// Îlots sur l'horizon : un monticule de sable, une touffe d'herbe, des palmiers.
+function creerIlots() {
+  const parties = [], palmiers = [];
+  for (const [i, o] of DECOR.ilots.entries()) {
+    parties.push(colorer(place(new THREE.IcosahedronGeometry(1, 1), { x: o.x, y: -o.taille * 0.12, z: o.z, sx: o.taille, sy: o.taille * 0.22, sz: o.taille * 0.8 }), TEINTES.sable, 0.06));
+    parties.push(colorer(place(new THREE.IcosahedronGeometry(1, 1), { x: o.x, y: o.taille * 0.02, z: o.z, sx: o.taille * 0.6, sy: o.taille * 0.12, sz: o.taille * 0.45 }), TEINTES.herbe, 0.1));
+    for (let k = 0; k < o.palmiers; k++) {
+      const a = hachage(i, k) * Math.PI * 2, d = hachage(k, i) * o.taille * 0.4;
+      palmiers.push({ x: o.x + Math.cos(a) * d, z: o.z + Math.sin(a) * d * 0.7, hauteur: 5 + hachage(i + k, 3) * 3, inclinaison: 0.3, direction: a, rotation: a * 3 });
+    }
+  }
+  // Les palmiers poussent sur le haut de leur îlot.
+  const hauteurIlot = (x, z) => {
+    const o = DECOR.ilots.reduce((a, b) => (Math.hypot(b.x - x, b.z - z) < Math.hypot(a.x - x, a.z - z) ? b : a));
+    return o.taille * 0.12;
+  };
+  return new THREE.Group().add(fusionner(parties, { ombre: false }), creerPalmiers(palmiers, hauteurIlot));
+}
+
+// Quatre ambiances : le jour pour créer son perso, le crépuscule de la
+// préparation, la nuit pendant les manches, et l'Illumination du protégé qui
+// éclaire toute la carte.
 const AMBIANCES = {
   jour: {
     ciel: '#ffffff', brouillard: '#cfe7f7', pres: 70, loin: 300,
@@ -641,6 +891,13 @@ const AMBIANCES = {
     ciel: '#03050b', brouillard: '#010207', pres: 2, loin: 22,
     hemi: 0.04, hemiCiel: '#5a6fae', hemiSol: '#0d0d14',
     astre: 0.09, astreCouleur: '#8fa6f0', etoiles: 0.75, lune: 0.8, mer: '#06131f',
+  },
+  // Crépuscule : les 30 secondes de préparation, pour voir où l'on pose le
+  // poteau avant que la nuit tombe.
+  crepuscule: {
+    ciel: '#e0907a', brouillard: '#4a3848', pres: 14, loin: 120,
+    hemi: 0.5, hemiCiel: '#ffb08a', hemiSol: '#3a2e38',
+    astre: 1.1, astreCouleur: '#ff9a5a', etoiles: 0.2, lune: 0.5, mer: '#2b4a70',
   },
   illumination: {
     ciel: '#3c5580', brouillard: '#2b3b5a', pres: 35, loin: 230,
@@ -698,6 +955,13 @@ export function creerIle(scene) {
   const bouees = creerBouees();
   const ecume = creerEcume();
   const tiki = creerTorchesTiki();
+  const barque = creerBarqueAmarree();
+  // Tout ce qui brûle sur l'île (hors torches de bambou) : feu de camp,
+  // lanterne de la tour de guet, réverbères.
+  const camp = DECOR.camp ? creerCamp(DECOR.camp) : null;
+  const tour = DECOR.tour ? creerTourDeGuet(DECOR.tour) : null;
+  const reverberes = creerReverberes();
+  const feux = creerFeux([...(camp?.foyers ?? []), ...(tour?.foyers ?? []), ...reverberes.foyers]);
   // La nuit sur l'île : lucioles au-dessus de l'herbe, brume sur le sable.
   const vieIle = [
     creerLucioles(64, (i) => {
@@ -713,6 +977,7 @@ export function creerIle(scene) {
     ile: new THREE.Group().add(
       creerTerrain(), mer, ecume, creerPalmiers(), creerRochers(), creerHerbes(), creerCabane(), creerPonton(), ...bouees, ...vieIle,
       tiki, creerBoisFlotte(), creerPetitDecor(), ...(DECOR.epave ? [creerEpave(DECOR.epave)] : []),
+      creerVegetationIle(), barque, feux, reverberes.groupe, creerIlots(), ...(camp ? [camp.groupe] : []), ...(tour ? [tour.groupe] : []),
     ),
     chateau: creerChateau(),
   };
@@ -721,7 +986,9 @@ export function creerIle(scene) {
     tempsIle += dt;
     for (const v of vieIle) v.userData.animer(dt, nuit);
     tiki.userData.animer(dt, nuit);
+    feux.userData.animer(dt, nuit);
     ecume.userData.animer(tempsIle);
+    barque.userData.animer(tempsIle);
   };
   // Les lampes des décors restent dans la scène, même quand leur décor est
   // caché (éteintes) : le nombre de lumières ne change pas d'une carte à
@@ -798,6 +1065,7 @@ export function creerIle(scene) {
     },
     mettreAJour(t, dt = 0) {
       mer.userData.animer(t);
+      souffler(dt);
       // Lucioles, braises et brume ne vivent que la nuit.
       const nuit = Math.min(1, actuelle.etoiles / AMBIANCES.nuit.etoiles);
       for (const decor of Object.values(decors)) if (decor.visible) decor.userData.animer(dt, nuit);

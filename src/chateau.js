@@ -129,6 +129,17 @@ export const OBSTACLES = [
   { x: 11, z: 9, rayon: 0.9, genre: 'foin' },
   { x: 13, z: 4, rayon: 0.8, genre: 'caisses' },
   { x: -12, z: -2, rayon: 0.7, genre: 'caisses' },
+  // La vie de la cour : marché, forge, mannequins d'entraînement, table,
+  // sacs, bûches, braseros.
+  { x: 7, z: -12.5, rayon: 1.6, genre: 'marche' },
+  { x: -11, z: -14, rayon: 1.5, genre: 'forge' },
+  { x: 12.5, z: -3.2, rayon: 0.4, genre: 'mannequin' },
+  { x: 14, z: -5.4, rayon: 0.4, genre: 'mannequin' },
+  { x: -5.5, z: -13.5, rayon: 1.1, genre: 'table' },
+  { x: -8.5, z: 14.5, rayon: 0.7, genre: 'sacs' },
+  { x: 15, z: -12, rayon: 0.8, genre: 'buches' },
+  { x: -4, z: 8.5, rayon: 0.35, genre: 'brasero' },
+  { x: 5, z: -7.5, rayon: 0.35, genre: 'brasero' },
 ];
 for (const [i, x] of [24.4, 26.3].entries()) {
   for (let j = 0; j < 11; j++) {

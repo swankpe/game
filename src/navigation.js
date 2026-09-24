@@ -1,8 +1,8 @@
-// Navigation des zombies sur une carte à murailles : un champ de distances
-// calculé sur une grille (1 m) depuis la cible, en respectant la règle des
+// Navigation des zombies sur les cartes ouvertes (village, forêt) : un champ
+// de distances calculé sur une grille (1 m) depuis la cible, en respectant la règle des
 // marches (on descend de n'importe quelle hauteur, on ne monte pas plus de
 // PAS_MAX d'un coup). Un zombie va toujours vers la case voisine la plus
-// proche de sa cible : il passe les portes et prend les rampes tout seul.
+// proche de sa cible : il contourne maisons, troncs et étang tout seul.
 // Les champs sont gardés en mémoire par case cible, et recalculés quand la
 // cible change de case.
 
@@ -125,14 +125,16 @@ export function creerNavigation(carte, pas = 1) {
     vers(x, z, tx, tz) {
       const c = champ(tx, tz);
       const a = indice(x, z);
-      if (!c || a < 0 || !Number.isFinite(c[a]) || c[a] <= pas * 1.5) return { x: tx, z: tz };
+      if (!c || a < 0 || c[a] <= pas * 1.5) return { x: tx, z: tz };
+      // Case bloquée (collé à un obstacle) : on rejoint la voisine la mieux placée.
+      const coince = !Number.isFinite(c[a]);
       const ai = a % n, aj = (a - ai) / n;
       let meilleur = -1, dMin = c[a];
       for (const [di, dj] of VOISINS) {
         const bi = ai + di, bj = aj + dj;
         if (bi < 0 || bj < 0 || bi >= n || bj >= n) continue;
         const b = bj * n + bi;
-        if (c[b] < dMin && passe(a, b, di, dj)) {
+        if (c[b] < dMin && (coince || passe(a, b, di, dj))) {
           dMin = c[b];
           meilleur = b;
         }

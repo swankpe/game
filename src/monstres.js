@@ -667,7 +667,7 @@ export function creerMonstresVue(scene) {
           v.racine.rotation.y = m.r;
         }
       }
-      // Disparu de la liste : il est mort (ou la manche est finie), il tombe.
+      // Disparu de la liste : il est mort (ou l'assaut est fini), il tombe.
       // Un bouffi, lui, a éclaté : l'explosion le cache, il disparaît d'un coup.
       for (const [id, v] of vues) {
         if (v.mort >= 0 || presents.has(id)) continue;

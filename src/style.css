@@ -73,6 +73,45 @@ body {
   font-size: 15px;
 }
 
+/* Lucie : son nom et sa vie, au-dessus d'elle. */
+.etiquette-protege {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: #ffe7c2;
+}
+
+.etiquette-protege i {
+  display: block;
+  width: 64px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.etiquette-protege b {
+  display: block;
+  height: 100%;
+  background: #6fd46a;
+}
+
+.etiquette-protege[data-danger='true'] b {
+  background: #ff5a4a;
+}
+
+/* L'autel, repéré de loin. */
+.marque-autel {
+  color: #d9ccff;
+  font-size: 16px;
+  text-shadow: 0 0 8px rgba(120, 80, 255, 0.9), 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.marque-autel::before {
+  content: '✦ ';
+}
+
 @keyframes appel {
   to {
     opacity: 0.55;
@@ -463,6 +502,7 @@ body.en-jeu #scene {
   align-items: baseline;
   gap: 14px;
   padding: 10px 18px;
+  white-space: nowrap;
 }
 
 .bandeau-partie strong {
@@ -479,12 +519,12 @@ body.en-jeu #scene {
   font-size: 14px;
 }
 
+/* La vie de Lucie, en haut à droite. */
 .vie {
   position: fixed;
-  left: 50%;
-  bottom: 56px;
-  transform: translateX(-50%);
-  width: 340px;
+  top: 70px;
+  right: 16px;
+  width: 280px;
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 4px 10px;
@@ -521,6 +561,11 @@ body.en-jeu #scene {
 
 .vie[data-danger='true'] #vie-barre {
   background: var(--erreur);
+}
+
+/* Lucie vient de prendre un coup. */
+.vie[data-frappe='true'] {
+  box-shadow: 0 0 0 3px rgba(216, 68, 58, 0.7), var(--ombre);
 }
 
 /* Barre de vie du boss, sous le bandeau de la manche. */
@@ -607,6 +652,23 @@ body.en-jeu #scene {
   box-shadow: 0 0 0 2px rgba(255, 120, 100, 0.55), 0 0 22px rgba(255, 60, 40, 0.45);
 }
 
+/* Le chrono du boss : au bout, c'est perdu. */
+.boss-chrono {
+  align-self: center;
+  margin-top: 2px;
+  color: #fff;
+  font-size: 34px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+
+.boss[data-presse='true'] .boss-chrono {
+  color: #ff6b4a;
+  animation: rage 0.5s ease-in-out infinite alternate;
+}
+
 @keyframes rage {
   from {
     filter: brightness(1);
@@ -616,22 +678,27 @@ body.en-jeu #scene {
   }
 }
 
-.illumination {
+/* Accalmie, rituel : sous le bandeau, au milieu. */
+.bandeau-phase {
   position: fixed;
   left: 50%;
-  bottom: 130px;
+  top: 70px;
   transform: translateX(-50%);
   margin: 0;
-  padding: 6px 14px;
+  padding: 7px 16px;
   border-radius: 999px;
-  background: rgba(20, 30, 50, 0.7);
+  background: rgba(20, 30, 50, 0.72);
   color: #ffe2a8;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
-.illumination[data-pret='true'] {
-  background: #f2c230;
-  color: var(--encre);
+.bandeau-phase[data-phase='rituel'] {
+  background: rgba(60, 30, 110, 0.8);
+  color: #e6dcff;
+  animation: appel 0.6s ease-in-out infinite alternate;
 }
 
 .lancement {
@@ -652,9 +719,9 @@ body.en-jeu #scene {
   margin: 0;
 }
 
-.choix-role {
-  display: flex;
-  gap: 8px;
+.lancement .note-essai {
+  color: var(--encre-douce);
+  font-size: 13px;
 }
 
 .viseur {
@@ -796,35 +863,61 @@ body.en-jeu #scene {
   background: #7ee08a;
 }
 
-/* Coups encaissables : deux cœurs, qui se vident. */
+/* Sa propre vie : un cœur, une jauge, un nombre. Elle luit pendant un repas. */
 .ligne-equipement {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.vies {
+.pv-joueur {
   display: flex;
-  gap: 4px;
-  padding: 7px 10px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
   border-radius: 999px;
   background: rgba(20, 30, 50, 0.72);
+  color: #fff;
+  font-variant-numeric: tabular-nums;
 }
 
-.vies i {
+.pv-joueur .coeur {
   width: 18px;
   height: 18px;
   background: #ff5a5f;
   clip-path: path('M9 16 C 9 16 1 10.5 1 5.6 C 1 2.9 3.1 1 5.4 1 C 7 1 8.3 2 9 3.2 C 9.7 2 11 1 12.6 1 C 14.9 1 17 2.9 17 5.6 C 17 10.5 9 16 9 16 Z');
 }
 
-.vies[data-restant='1'] i:nth-child(2),
-.vies[data-restant='0'] i {
-  background: rgba(255, 255, 255, 0.18);
+.jauge-pv {
+  width: 150px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
 }
 
-.vies[data-restant='1'] i:first-child {
+#pv-barre {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(180deg, #ff8a7a, #d8312a);
+  transition: width 0.2s linear;
+}
+
+.pv-joueur strong {
+  min-width: 2.2em;
+  text-align: right;
+}
+
+.pv-joueur[data-danger='true'] .coeur {
   animation: appel 0.5s ease-in-out infinite alternate;
+}
+
+.pv-joueur[data-mange='true'] #pv-barre {
+  background: linear-gradient(180deg, #a8f08a, #3fae4a);
+}
+
+.pv-joueur[data-mange='true'] .coeur {
+  background: #7ee08a;
 }
 
 /* Munitions, en bas à droite. */
@@ -901,6 +994,7 @@ body.en-jeu #scene {
   position: fixed;
   left: 50%;
   top: 64%;
+  z-index: 1;
   transform: translateX(-50%);
   margin: 0;
   padding: 10px 18px;
@@ -909,6 +1003,10 @@ body.en-jeu #scene {
   color: #fff;
   font-weight: 600;
   pointer-events: none;
+}
+
+.reprendre[data-camp='true'] {
+  top: 42%;
 }
 
 .degats {
@@ -921,14 +1019,42 @@ body.en-jeu #scene {
 
 /* Argent et armes */
 
+/* L'inventaire, au milieu en bas : l'argent et la vie, puis les armes
+   possédées et les vivres. */
 .equipement {
   position: fixed;
-  left: 16px;
+  left: 50%;
   bottom: 56px;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
+}
+
+.inventaire {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+}
+
+.barre-vivres {
+  padding-left: 14px;
+  border-left: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.case-vivre {
+  width: 72px;
+}
+
+.case-vivre .niveau {
+  color: #fff;
+  letter-spacing: 0;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.case-arme[data-etat='mange'] {
+  border-color: #7ee08a;
 }
 
 .bourse {
@@ -1028,6 +1154,47 @@ body.en-jeu #scene {
 .case-arme[data-etat='equipee'] {
   border-color: #ffd76a;
   box-shadow: 0 0 0 2px rgba(255, 215, 106, 0.35);
+}
+
+.case-arme[hidden] {
+  display: none;
+}
+
+/* Les dégâts au-dessus d'un zombie touché. */
+.chiffre-degats {
+  color: #fff;
+  font: 700 22px/1 var(--police);
+  font-variant-numeric: tabular-nums;
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.8),
+    0 2px 4px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.chiffre-degats[data-genre='tete'] {
+  color: #ffd24a;
+  font-size: 28px;
+}
+
+.chiffre-degats[data-genre='tete']::after {
+  content: ' !';
+}
+
+.chiffre-degats[data-genre='grenade'] {
+  color: #ff9a4a;
+  font-size: 25px;
+}
+
+.chiffre-degats.saute {
+  animation: saute 0.25s ease-out;
+}
+
+@keyframes saute {
+  from {
+    transform: scale(1.7);
+  }
 }
 
 /* Armurerie */

@@ -1,20 +1,24 @@
 // Règles et réglages du Protégé. Tout l'équilibrage tient ici : changer une
 // durée ou une cadence ne demande de toucher à rien d'autre.
 
-export const DUREE_MANCHE = 300;
-
-// Réglages d'essai, pour tester vite : manches courtes, boss fragile (part de
-// ses points de vie), de l'argent au départ de chaque partie. Ils ne touchent
-// que le jeu (jeu.js les donne à la simulation) ; les tests vérifient le jeu
-// normal. actif: false pour revenir au jeu normal.
-export const ESSAI = { actif: true, dureeManche: 120, pvBoss: 0.1, argentDepart: 10000 };
-// Avant chaque manche, sur sa carte : le temps d'acheter ses armes et de
-// placer le poteau (et la lanterne) au meilleur endroit. Tout le monde prêt
-// (Entrée) : on n'attend pas la fin.
-export const DUREE_PREPARATION = 30;
-export const DUREE_PAUSE = 8;
+// Le déroulé d'une carte : les zombies arrivent en continu pendant un assaut,
+// puis la lumière revient pour une accalmie (la carte s'illumine, les zombies
+// restants fuient) : le temps de se ravitailler à l'armurerie et de manger.
+// On arrive sur chaque carte par une accalmie. Le boss, lui, ne vient que
+// si l'on pose le protégé sur l'autel de la carte (voir BOSS).
+export const CYCLE = { accalmie: 30, assaut: 100 };
+export const DUREE_VICTOIRE = 10;
 export const DUREE_DEFAITE = 8;
 
+// Réglages d'essai, pour tester vite : assauts et accalmies courts, boss
+// fragile (part de ses points de vie), de l'argent au départ de chaque
+// partie. Ils ne touchent que le jeu (jeu.js les donne à la simulation) ;
+// les tests vérifient le jeu normal. actif: false pour revenir au jeu normal.
+export const ESSAI = { actif: true, accalmie: 20, assaut: 60, pvBoss: 0.1, argentDepart: 10000 };
+
+// Le protégé n'est jamais un joueur : une villageoise ligotée au poteau, qui
+// porte la lanterne. Tout le jeu consiste à la garder en vie.
+export const NOM_PROTEGE = 'Lucie';
 export const PV_PROTEGE = 100;
 export const PV_MONSTRE = 30;
 export const MULTIPLICATEUR_TETE = 2;
@@ -99,8 +103,17 @@ export const BONUS_DEGATS_MAX = 1 + ETOILES.degats * ETOILES.niveauMax;
 // Armes possédées : un bit par arme, le pistolet (bit 0) toujours présent.
 export const ARMES_DEPART = 1;
 
-export const BONUS_MANCHE = 150;
+// Prime de chacun quand le boss d'une carte tombe.
+export const BONUS_BOSS = 200;
 export const DISTANCE_BOUTIQUE = 3.2;
+
+// La nourriture, à l'armurerie : elle rend des points de vie peu à peu (soin
+// en duree secondes). max : combien on peut en porter.
+export const VIVRES = [
+  { id: 'pomme', nom: 'Pomme', prix: 40, soin: 30, duree: 2, max: 6, description: 'Croquante et vite avalée : 30 points de vie en 2 secondes.' },
+  { id: 'ragout', nom: 'Ragoût', prix: 110, soin: 80, duree: 5, max: 3, description: 'Un vrai repas : 80 points de vie, le temps de le finir (5 secondes).' },
+];
+export const indiceVivre = (id) => VIVRES.findIndex((v) => v.id === id);
 
 // La lanterne du protégé, améliorable à l'armurerie pour toute l'équipe :
 // prix du niveau suivant, puis par niveau (0 à 3) la portée du faisceau (m),
@@ -117,26 +130,25 @@ export const NIVEAU_LANTERNE_MAX = LANTERNE.prix.length;
 
 // Les joueurs aussi sont attaqués. Un zombie à moins de aggro mètres d'un
 // défenseur (et plus près de lui que du poteau) se jette sur lui ; il frappe
-// toutes les cadence secondes (multipliées par celle de son type). Au bout de
-// coups coups, le défenseur est à terre : un allié le relève en restant près
-// de lui, E maintenu, pendant dureeReleve. Sans autre défenseur dans la
-// partie, on se relève seul au bout de releveSeul. Un coup s'efface après
-// soin secondes sans être touché ; repit : invulnérable juste après un coup.
-// Un bouffi qui éclate à moins de explosion mètres donne un coup.
+// toutes les cadence secondes (multipliées par celle de son type), coup
+// points de vie par coup (fois les coups de son type) : deux coups d'un
+// rôdeur et l'on est à terre. Un allié relève en restant près, E maintenu,
+// pendant dureeReleve ; seul dans la partie, on se relève au bout de
+// releveSeul. On se relève avec pvReleve points de vie. Pas de soin tout
+// seul : il faut manger (VIVRES). repit : invulnérable juste après un coup.
+// Un bouffi qui éclate à moins de explosion mètres fait un coup.
 export const JOUEUR = {
-  coups: 2,
+  pv: 100,
+  coup: 50,
+  pvReleve: 50,
   aggro: 6,
   cadence: 1.1,
   repit: 1,
-  soin: 12,
   distanceReleve: 1.8,
   dureeReleve: 3,
   releveSeul: 15,
   explosion: 2.5,
 };
-
-export const DUREE_ILLUMINATION = 30;
-export const RECHARGE_ILLUMINATION = 180;
 
 // Un zombie au contact retire DEGATS_MONSTRE points par seconde (multiplié
 // par les degats de son type).
@@ -145,7 +157,7 @@ export const DEGATS_MONSTRE = 6;
 export const MONSTRES_MAX = 60;
 
 // Les types de zombies, dans l'ordre de leur indice k (instantanés). pv,
-// vitesse et degats multiplient les valeurs de la manche ; largeur et hauteur,
+// vitesse et degats multiplient les valeurs du moment (danger) ; largeur et hauteur,
 // la silhouette (et donc la zone à toucher) ; recompense : argent du tueur.
 // max : nombre de ce type en même temps sur l'île ; etoile : chance de lâcher
 // une étoile ; coups : coups portés à un joueur par attaque (1 par défaut) ;
@@ -169,8 +181,8 @@ export const TYPES_ZOMBIES = [
     etoile: 0.06,
     alerte: 'Un bouffi ! Il explose : abattez-le loin du poteau (et de vous).',
   },
-  // Le boss de fin de manche (voir BOSS) : jamais tiré au sort, ses points de
-  // vie viennent de pvBoss.
+  // Le boss (voir BOSS) : jamais tiré au sort, ses points de vie viennent de
+  // pvBoss.
   {
     id: 'boss', nom: 'Le Roi Noyé', pv: 1, vitesse: 0.42, degats: 4, largeur: 3, hauteur: 3, recompense: 250, boss: true,
     etoile: 1, coups: 2, cadence: 1.8,
@@ -184,42 +196,49 @@ export const indiceType = (id) => TYPES_ZOMBIES.findIndex((t) => t.id === id);
 // pour chaque zombie emporté.
 export const EXPLOSION_BOUFFI = { rayon: 3.5, degats: 80, protege: 25 };
 
+// Le danger monte d'une carte à l'autre (etape : bosses déjà abattus) et
+// d'un assaut à l'autre sur la même carte (cycle : 1 pour le premier). Il
+// règle la cadence, la vitesse, la vie et le mélange des zombies.
+export const danger = (etape, cycle) => 1 + 0.9 * etape + 0.3 * Math.max(0, cycle - 1);
+
 // Part de chaque type parmi les apparitions (poids relatifs, dans l'ordre de
-// TYPES_ZOMBIES ; le boss, sans poids, n'est jamais tiré). Les colosses attendent la deuxième minute de la première
-// manche ; les types spéciaux gagnent du terrain de manche en manche.
-export function poidsTypes(manche, ecoule, duree = DUREE_MANCHE) {
-  const avance = ecoule / duree;
-  const m = manche - 1;
+// TYPES_ZOMBIES ; le boss, sans poids, n'est jamais tiré). Au tout premier
+// assaut, les colosses attendent un peu ; les types spéciaux gagnent du
+// terrain avec le danger et au fil de l'assaut (avance : de 0 à 1).
+export function poidsTypes(niveau, ecoule, avance = 0) {
+  const m = niveau - 1;
   return [
     1,
     0.22 + 0.05 * m,
-    manche === 1 && ecoule < 60 ? 0 : 0.03 + 0.025 * m + 0.03 * avance,
+    m < 0.25 && ecoule < 45 ? 0 : 0.03 + 0.025 * m + 0.03 * avance,
     0.06 + 0.03 * m + 0.03 * avance,
   ];
 }
 
-// Le boss de fin de manche. Quand le chrono tombe à zéro, il sort de la
-// mer : la manche n'est gagnée qu'à sa mort. Pendant le combat, les zombies
-// continuent d'arriver (apparitions : part de la cadence de début de manche)
-// et il appelle des coureurs en renfort toutes les invocation secondes. Sous
-// la moitié de sa vie (enrage), il accélère.
+// Le boss de chaque carte. Il ne vient que si l'on pose le protégé sur
+// l'autel : un rituel de rituel secondes, puis il surgit. Il faut l'abattre
+// en duree secondes, sinon c'est perdu. Pendant le combat, les zombies
+// continuent d'arriver (apparitions : part de la cadence d'un assaut) et il
+// appelle des coureurs en renfort toutes les invocation secondes. Sous la
+// moitié de sa vie (enrage), il accélère.
 export const BOSS = {
   nom: 'Le Roi Noyé',
-  pv: 1500, parManche: 0.6, parDefenseur: 0.8,
+  duree: 150, rituel: 4,
+  pv: 1500, parEtape: 0.6, parDefenseur: 0.8,
   apparitions: 0.5,
   invocation: 12, premiereInvocation: 8, renforts: 3,
   enrage: 0.5, vitesseEnrage: 1.5,
 };
 
-// Ses points de vie montent de manche en manche et avec le nombre de
-// défenseurs (au moins un : le joueur seul face au mannequin).
-export function pvBoss(manche, defenseurs) {
+// Ses points de vie montent de carte en carte (etape : bosses déjà abattus)
+// et avec le nombre de défenseurs.
+export function pvBoss(etape, defenseurs) {
   const d = Math.max(1, defenseurs);
-  return Math.round(BOSS.pv * (1 + BOSS.parManche * (manche - 1)) * (1 + BOSS.parDefenseur * (d - 1)));
+  return Math.round(BOSS.pv * (1 + BOSS.parEtape * etape) * (1 + BOSS.parDefenseur * (d - 1)));
 }
 
-// Renforts appelés à chaque cri : un de plus toutes les deux manches.
-export const renfortsBoss = (manche) => BOSS.renforts + Math.floor((manche - 1) / 2);
+// Renforts appelés à chaque cri : un de plus toutes les deux cartes.
+export const renfortsBoss = (etape) => BOSS.renforts + Math.floor(etape / 2);
 
 // Tirage d'un type selon les poids (tirage : nombre entre 0 et 1).
 export function tirerType(poids, tirage) {
@@ -252,21 +271,19 @@ export const RAYON_MONSTRE = 0.4;
 export const HAUTEUR_MONSTRE = 1.95;
 export const HAUTEUR_TETE = 1.55;
 
-// La cadence d'apparition monte pendant la manche (×2,5 à la fin) et d'une
-// manche à l'autre.
-// duree : longueur de la manche (plus courte en essai), pour que la montée
-// aille toujours jusqu'au bout.
-export function monstresParMinute(manche, ecoule, duree = DUREE_MANCHE) {
-  const base = 18 + 8 * (manche - 1);
-  return base * (1 + (1.5 * ecoule) / duree);
+// La cadence d'apparition monte pendant un assaut (avance : de 0 à 1, ×1,8 à
+// la fin) et avec le danger.
+export function monstresParMinute(niveau, avance = 0) {
+  const base = 18 + 8 * (niveau - 1);
+  return base * (1 + 0.8 * avance);
 }
 
-export function vitesseMonstre(manche) {
-  return Math.min(2.3 + 0.2 * (manche - 1), 4);
+export function vitesseMonstre(niveau) {
+  return Math.min(2.3 + 0.2 * (niveau - 1), 4);
 }
 
-export function pvMonstre(manche) {
-  return Math.round(PV_MONSTRE * (1 + 0.15 * (manche - 1)));
+export function pvMonstre(niveau) {
+  return Math.round(PV_MONSTRE * (1 + 0.15 * (niveau - 1)));
 }
 
 // Dégâts d'une explosion selon la distance au centre (40 % au bord).
@@ -274,15 +291,6 @@ export function pvMonstre(manche) {
 export function degatsExplosion(source, distance, degats = source.degats) {
   if (distance > source.rayon) return 0;
   return Math.round(degats * (1 - 0.6 * (distance / source.rayon)));
-}
-
-// En solo, le joueur choisit son rôle ; sinon tirage au sort, en évitant de
-// désigner deux fois de suite la même personne.
-export function tirerProtege(membres, { aleatoire = Math.random, roleSolo = 'defenseur', precedent = null } = {}) {
-  if (membres.length === 0) return null;
-  if (membres.length === 1) return roleSolo === 'protege' ? membres[0].id : null;
-  const candidats = membres.filter((m) => m.id !== precedent);
-  return candidats[Math.floor(aleatoire() * candidats.length) % candidats.length].id;
 }
 
 // Premier zombie traversé par un tir. cibles : [{ id, x, y, z, l, h }], y aux

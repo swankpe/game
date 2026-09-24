@@ -1,15 +1,42 @@
-// Le poteau : mât, cordes, lanterne orientable et, faute de protégé humain,
-// le mannequin de paille. Repère local : le protégé regarde vers +z, le mât
-// est dans son dos.
+// Le poteau : mât, cordes, lanterne orientable, et Lucie, la villageoise
+// qu'on protège, ligotée dessus. Repère local : elle regarde vers +z, le mât
+// est dans son dos. Au-dessus d'elle, son nom et sa vie.
 
 import * as THREE from 'three';
+import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { animerPersonnage, creerPersonnage } from './personnage.js';
-import { LANTERNE } from './regles.js';
+import { LANTERNE, NOM_PROTEGE } from './regles.js';
 
-const MANNEQUIN = {
-  tete: 'patate', yeux: 'petits', chapeau: 'paille',
-  peau: '#d9b56c', haut: '#8a6a4c', salopette: '#b59560', bottes: '#4a3527', couleurChapeau: '#c9a45a',
+const LUCIE = {
+  tete: 'oeuf', yeux: 'ronds', chapeau: 'aucun',
+  peau: '#f0d2b0', haut: '#e9e4d8', salopette: '#7a2e3a', bottes: '#4a3527', couleurChapeau: '#d8443a',
 };
+
+// Ce qui fait d'elle une villageoise : une robe, un tablier, un fichu noué
+// sur la tête, deux tresses.
+function habillerLucie(lucie) {
+  const { corps, tete } = lucie.userData.parties;
+  const mat = (c) => new THREE.MeshStandardMaterial({ color: c, flatShading: true, roughness: 0.85 });
+  const robe = mat('#7a2e3a'), tablier = mat('#f2ecdc'), fichu = mat('#d8443a'), cheveux = mat('#6b3f22');
+  const ajouter = (parent, geo, m, x, y, z) => {
+    const o = new THREE.Mesh(geo, m);
+    o.position.set(x, y, z);
+    o.castShadow = true;
+    parent.add(o);
+    return o;
+  };
+  ajouter(corps, new THREE.CylinderGeometry(0.25, 0.42, 0.62, 9), robe, 0, 0.78, 0);
+  ajouter(corps, new THREE.BoxGeometry(0.34, 0.5, 0.04), tablier, 0, 0.86, 0.3).rotation.x = -0.22;
+  ajouter(corps, new THREE.BoxGeometry(0.26, 0.16, 0.04), tablier, 0, 1.2, 0.2);
+  const dessus = ajouter(tete, new THREE.SphereGeometry(0.235, 9, 5, 0, Math.PI * 2, 0, Math.PI / 2), fichu, 0, 0.3, -0.02);
+  dessus.scale.set(1, 0.85, 1.05);
+  ajouter(tete, new THREE.ConeGeometry(0.07, 0.16, 5), fichu, 0, 0.3, -0.25).rotation.x = -1.2;
+  for (const c of [-1, 1]) {
+    const tresse = ajouter(tete, new THREE.CylinderGeometry(0.045, 0.03, 0.42, 5), cheveux, c * 0.19, 0.08, -0.06);
+    tresse.rotation.z = c * 0.15;
+    ajouter(tete, new THREE.IcosahedronGeometry(0.045, 0), fichu, c * 0.22, -0.14, -0.06);
+  }
+}
 
 export const HAUTEUR_LANTERNE = 2.35;
 // Intensité du faisceau et de la lueur (en candelas, unités physiques de
@@ -75,9 +102,24 @@ export function creerPoteau(scene) {
   let allumage = 0;
   let puissance = 1;
 
-  const mannequin = creerPersonnage(MANNEQUIN);
-  mannequin.visible = false;
-  groupe.add(mannequin);
+  const lucie = creerPersonnage(LUCIE);
+  habillerLucie(lucie);
+  lucie.visible = false;
+  groupe.add(lucie);
+
+  // Son nom et sa vie, au-dessus d'elle.
+  const etiquette = document.createElement('div');
+  etiquette.className = 'etiquette etiquette-protege';
+  const nom = document.createElement('span');
+  nom.textContent = NOM_PROTEGE;
+  const jauge = document.createElement('i');
+  const barre = document.createElement('b');
+  jauge.append(barre);
+  etiquette.append(nom, jauge);
+  const bulle = new CSS2DObject(etiquette);
+  bulle.position.set(0, 2.95, 0);
+  bulle.visible = false;
+  groupe.add(bulle);
 
   scene.add(groupe);
 
@@ -116,13 +158,19 @@ export function creerPoteau(scene) {
       vitre.scale.setScalar(1 + n * 0.12);
       this.allumer(allumage);
     },
-    // occupant : 'personne' (lobby), 'mannequin' ou 'humain' (dessiné par avatars.js).
-    occuper(occupant) {
-      mannequin.visible = occupant === 'mannequin';
-      cordes.visible = occupant !== 'personne';
+    // present : Lucie est-elle au poteau (faux quand on quitte le salon).
+    occuper(present) {
+      lucie.visible = present;
+      cordes.visible = present;
+    },
+    // Sa vie au-dessus d'elle (part : de 0 à 1) ; visible : en partie.
+    vie(part, visible) {
+      bulle.visible = visible && lucie.visible;
+      barre.style.width = `${Math.max(0, Math.min(1, part)) * 100}%`;
+      etiquette.dataset.danger = String(part < 0.35);
     },
     animer(dt) {
-      if (mannequin.visible) animerPersonnage(mannequin, dt, { pose: 'attache' });
+      if (lucie.visible) animerPersonnage(lucie, dt, { pose: 'attache' });
     },
   };
 }

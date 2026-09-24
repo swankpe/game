@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Le Protégé</title>
-    <meta name="description" content="Jeu coopératif en 3D pour 4 amis : protégez celui qui porte la lumière." />
+    <meta name="description" content="Jeu coopératif en 3D pour 4 amis : protégez Lucie des zombies, de carte en carte." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <canvas id="scene" tabindex="-1" aria-label="Vue 3D de l'île"></canvas>
+    <canvas id="scene" tabindex="-1" aria-label="Vue 3D du jeu"></canvas>
     <div class="vignette" aria-hidden="true"></div>
 
     <main id="creation" class="panneau">
@@ -74,7 +74,7 @@
         <span id="tues"></span>
       </div>
       <div id="vie" class="carte vie" hidden>
-        <span class="vie-titre">Protégé</span>
+        <span class="vie-titre">Protégée</span>
         <span id="vie-nom"></span>
         <div class="jauge"><div id="vie-barre"></div></div>
       </div>
@@ -87,8 +87,9 @@
           <div id="boss-trace" class="boss-trace"></div>
           <div id="boss-barre" class="boss-barre"></div>
         </div>
+        <strong id="boss-chrono" class="boss-chrono" aria-label="Temps pour abattre le boss"></strong>
       </div>
-      <p id="illumination" class="illumination" hidden></p>
+      <p id="bandeau-phase" class="bandeau-phase" hidden></p>
 
       <div id="equipement" class="equipement" hidden>
         <div class="ligne-equipement">
@@ -96,17 +97,21 @@
             <span id="gain" class="gain" hidden></span>
             <strong id="argent">0 $</strong>
           </div>
-          <div id="vies" class="vies" hidden aria-label="Coups encaissables"><i></i><i></i></div>
+          <div id="pv-joueur" class="pv-joueur" hidden aria-label="Tes points de vie">
+            <span class="coeur" aria-hidden="true"></span>
+            <div class="jauge-pv"><div id="pv-barre"></div></div>
+            <strong id="pv-texte">100</strong>
+          </div>
         </div>
-        <div id="barre-armes" class="barre-armes"></div>
+        <div class="inventaire">
+          <div id="barre-armes" class="barre-armes"></div>
+          <div id="barre-vivres" class="barre-armes barre-vivres" hidden></div>
+        </div>
       </div>
 
       <div id="lancement" class="carte lancement">
         <p id="texte-lancement"></p>
-        <div id="role-solo" class="choix-role" hidden>
-          <button type="button" class="forme" data-role="defenseur">Défenseur</button>
-          <button type="button" class="forme" data-role="protege">Protégé</button>
-        </div>
+        <p id="essai-lancement" class="note-essai" hidden></p>
         <button id="lancer" type="button" class="principal">Lancer la partie</button>
         <p class="note">ou appuie sur Entrée</p>
       </div>

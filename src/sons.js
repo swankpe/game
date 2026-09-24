@@ -294,3 +294,43 @@ export function sonEtoile() {
     o.stop(debut + 0.4);
   });
 }
+
+// On mange : trois croquées (bruit filtré, de plus en plus sourdes).
+export function sonManger() {
+  const ctx = audio();
+  if (!ctx) return;
+  for (let i = 0; i < 3; i++) {
+    const t = ctx.currentTime + i * 0.16;
+    const s = ctx.createBufferSource();
+    s.buffer = bruit;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 2400 - i * 500;
+    f.Q.value = 1.4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    s.connect(f).connect(g).connect(ctx.destination);
+    s.start(t, Math.random() * 0.2, 0.1);
+  }
+}
+
+// Le rituel commence : un gong grave qui résonne.
+export function sonRituel() {
+  const ctx = audio();
+  if (!ctx) return;
+  for (const [f, v] of [[98, 0.3], [147, 0.16], [233, 0.08]]) {
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(f * 0.97, ctx.currentTime + 3);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(v, ctx.currentTime + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 3.2);
+    o.connect(g).connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + 3.3);
+  }
+}

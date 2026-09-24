@@ -3,13 +3,15 @@
 // déplacements (joueur.js) et la simulation, pour que ce qu'on voit et ce qui
 // bloque soient toujours la même chose.
 //
-// Chaque manche se joue sur une carte (carteDeManche) : l'île, puis la cour du
-// château (chateau.js), et ainsi de suite. Les fonctions exportées sous leur
-// nom (hauteurSol, resoudreCollisions…) sont celles de l'île ; pour la carte en
-// cours, passer par carte() (navigateur) ou CARTES[s.carte] (simulation).
+// La partie est un parcours de cartes ouvertes (carteDEtape) : l'île, le
+// village (village.js), la forêt (foret.js), puis on recommence, plus fort.
+// Chaque boss abattu fait passer à la suivante. Les fonctions exportées sous
+// leur nom (hauteurSol, resoudreCollisions…) sont celles de l'île ; pour la
+// carte en cours, passer par carte() (navigateur) ou CARTES[s.carte]
+// (simulation).
 
-import * as chateau from './chateau.js';
-import { creerNavigation } from './navigation.js';
+import { FORET } from './foret.js';
+import { VILLAGE } from './village.js';
 
 export const RAYON_ILE = 30;
 export const RAYON_JOUEUR = 0.35;
@@ -83,6 +85,9 @@ export const BOUTIQUE = { x: CABANE.x + CABANE.profondeur / 2 + 1.3, z: CABANE.z
 
 // Sur le sable, face au ponton et à la mer.
 export const APPARITION = { x: 16.5, z: 0, orientation: Math.PI / 2 };
+
+// L'autel de l'île : y poser le protégé appelle le boss.
+export const AUTEL_ILE = { x: -1, z: 13, rayon: 2 };
 
 function generateur(graine) {
   let a = graine >>> 0;
@@ -211,6 +216,7 @@ function genererDecor() {
   // place, et aux abords de l'armurerie et de l'arrivée.
   const POTEAU_ILE = { x: 6, z: -3 };
   const degage = (x, z, marge) => libre(x, z, marge) && Math.hypot(x - POTEAU_ILE.x, z - POTEAU_ILE.z) > 6.5
+    && Math.hypot(x - AUTEL_ILE.x, z - AUTEL_ILE.z) > 4 + marge
     && Math.hypot(x - BOUTIQUE.x, z - BOUTIQUE.z) > 3 && loinDe(x, z, torches, 1.5) && loinDe(x, z, caisses, 1.5)
     && (!epave || Math.hypot(x - epave.x, z - epave.z) > 3);
   // Le camp des naufragés : un feu de camp, une tente, des totems.
@@ -355,14 +361,12 @@ export const PROFONDEUR_PIEDS = -2.2;
 // - hauteurSol : où l'on marche ; hauteurPieds : où posent les pieds d'un
 //   zombie (sur l'île, il marche au fond de l'eau) ;
 // - solBalles, solGrenades : en dessous, c'est plein ;
-// - navigation() : champ de distances pour contourner les murs, ou null
-//   (sur l'île, on marche droit et on glisse le long des obstacles).
+// - autel : { x, z, rayon } ; y poser le protégé appelle le boss.
 const ILE = {
   id: 'ile',
   nom: 'L’île',
-  conseil: 'Au centre de l’île, la lanterne voit venir les zombies de tous les côtés.',
+  conseil: 'Posez Lucie sur l’autel, au nord de l’île : il appelle le boss.',
   sortieBoss: 'Il sort des flots !',
-  borne: 48,
   hauteurTerrain,
   hauteurSol,
   hauteurPieds: (x, z) => Math.max(hauteurTerrain(x, z), PROFONDEUR_PIEDS),
@@ -372,41 +376,18 @@ const ILE = {
   estPraticable,
   resoudreCollisions,
   pointDeSortie: sortieIle,
+  // Sur l'île, les zombies vont droit et glissent le long des obstacles.
+  navigation: () => null,
   boutique: BOUTIQUE,
   apparition: APPARITION,
   poteau: { x: 6, z: -3 },
-  navigation: () => null,
+  autel: AUTEL_ILE,
 };
 
-let navigationChateau = null;
-const CHATEAU = {
-  id: 'chateau',
-  nom: 'La cour du château',
-  conseil: 'Montez le poteau sur la terrasse, au centre : de là-haut, la lanterne éclaire toute la cour. Une seule rampe y mène.',
-  sortieBoss: 'Il surgit des ténèbres !',
-  borne: chateau.BORNE,
-  hauteurTerrain: chateau.hauteurSol,
-  hauteurSol: chateau.hauteurSol,
-  hauteurPieds: chateau.hauteurSol,
-  solBalles: chateau.hauteurSol,
-  solGrenades: chateau.hauteurSol,
-  estPraticable: chateau.estPraticable,
-  resoudreCollisions: chateau.resoudreCollisions,
-  pointDeSortie: chateau.pointDeSortie,
-  boutique: chateau.BOUTIQUE,
-  apparition: chateau.APPARITION,
-  poteau: chateau.POTEAU,
-  navigation: () => (navigationChateau ??= creerNavigation({
-    borne: chateau.BORNE,
-    hauteurSol: chateau.hauteurSol,
-    bloque: (x, z) => !chateau.estPraticable(x, z) || chateau.OBSTACLES.some((o) => Math.hypot(x - o.x, z - o.z) < o.rayon + 0.3),
-  })),
-};
+export const CARTES = [ILE, VILLAGE, FORET];
 
-export const CARTES = [ILE, CHATEAU];
-
-// L'île pour la manche 1 (et le camp), le château pour la 2, puis on alterne.
-export const carteDeManche = (manche) => (manche >= 1 ? (manche - 1) % CARTES.length : 0);
+// La carte de l'étape (0 : la première) : on boucle sur le parcours.
+export const carteDEtape = (etape) => ((etape % CARTES.length) + CARTES.length) % CARTES.length;
 
 let active = ILE;
 // La carte affichée dans ce navigateur (celle de l'instantané reçu).

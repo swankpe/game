@@ -1,15 +1,18 @@
 // Rendu de l'île et de l'environnement commun à toutes les cartes (ciel,
 // étoiles, lune, ambiances). Tout le décor est fusionné par grandes familles
 // (troncs, palmes, rochers, herbes…) : quelques appels de dessin au lieu de
-// centaines. La cour du château (rendu-chateau.js) est construite aussi, et
-// l'on montre l'une ou l'autre selon la carte de la manche.
+// centaines. Le village (rendu-village.js) et la forêt (rendu-foret.js) sont
+// construits aussi, et l'on montre celui de la carte en cours.
 
 import * as THREE from 'three';
 import { creerBraises, creerBrume, creerLucioles } from './ambiance.js';
 import { creerModeleArme } from './armes.js';
 import { colorer, fusionner, hachage, lumineux, place } from './geometrie.js';
-import { CABANE, CARTES, DECOR, PONTON, distanceRelative, estHerbe, hauteurTerrain, rayonIle, surPonton } from './monde.js';
-import { caisses, creerChateau } from './rendu-chateau.js';
+import { creerAutel } from './autel.js';
+import { caisses, creerFeux, textureHalo } from './decor-commun.js';
+import { AUTEL_ILE, CABANE, CARTES, DECOR, PONTON, distanceRelative, estHerbe, hauteurTerrain, rayonIle, surPonton } from './monde.js';
+import { creerForet } from './rendu-foret.js';
+import { creerVillage } from './rendu-village.js';
 import { creerVegetation, souffler } from './vegetation.js';
 
 const TEINTES = {
@@ -426,21 +429,6 @@ function creerTorchesTiki() {
   return groupe;
 }
 
-function textureHalo() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  const d = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  d.addColorStop(0, 'rgba(255, 210, 130, 1)');
-  d.addColorStop(0.3, 'rgba(255, 150, 60, 0.5)');
-  d.addColorStop(1, 'rgba(255, 120, 40, 0)');
-  g.fillStyle = d;
-  g.fillRect(0, 0, 64, 64);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
 const PETALES = ['#e84a5f', '#ffd166', '#f4f1de', '#b388eb', '#ff8c42'];
 
 // Fougères, fleurs, coquillages, étoiles de mer, caisses : les petites choses.
@@ -673,37 +661,6 @@ function creerVegetationIle() {
   return creerVegetation(plantes);
 }
 
-// Des flammes qui brillent sans éclairer, un halo, des braises : pour le feu
-// de camp et les lanternes. foyers : [[x, y, z, taille]].
-function creerFeux(foyers, braisesParFoyer = 6) {
-  const flammes = [];
-  for (const [x, y, z, t] of foyers) {
-    flammes.push(place(new THREE.ConeGeometry(0.13 * t, 0.42 * t, 5), { x, y: y + 0.2 * t, z }));
-    if (t > 1.5) for (const [dx, dz] of [[0.18, 0.1], [-0.15, 0.12], [0.02, -0.18]]) flammes.push(place(new THREE.ConeGeometry(0.1 * t * 0.6, 0.35 * t * 0.6, 5), { x: x + dx * t * 0.5, y: y + 0.1 * t, z: z + dz * t * 0.5 }));
-  }
-  const matFlamme = new THREE.MeshBasicMaterial({ color: '#ffb347', fog: false });
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(flammes.flatMap((g) => [...g.toNonIndexed().attributes.position.array]), 3));
-  const halos = new THREE.BufferGeometry();
-  halos.setAttribute('position', new THREE.Float32BufferAttribute(foyers.flatMap(([x, y, z, t]) => [x, y + 0.2 * t, z]), 3));
-  const matHalos = new THREE.PointsMaterial({
-    map: textureHalo(), color: new THREE.Color(1.8, 1.8, 1.8), size: 1.4, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
-  });
-  const braises = creerBraises(foyers.map(([x, y, z, t]) => [x, y + 0.3 * t, z]), foyers.length * braisesParFoyer);
-  const groupe = new THREE.Group().add(new THREE.Mesh(geo, matFlamme), new THREE.Points(halos, matHalos), braises);
-  let temps = 0;
-  groupe.userData.animer = (dt, nuit) => {
-    temps += dt;
-    const v = 0.85 + Math.sin(temps * 11) * 0.08 + Math.sin(temps * 7.1) * 0.07;
-    matFlamme.color.setRGB(1, 0.62 + v * 0.1, 0.25 + v * 0.05).multiplyScalar(7);
-    matHalos.size = 1.3 + v * 0.35;
-    // Le jour, le halo s'efface : il ne se voit que dans la pénombre.
-    matHalos.opacity = 0.15 + 0.85 * nuit;
-    braises.userData.animer(dt, nuit);
-  };
-  return groupe;
-}
-
 const TOILE = '#d9cba3';
 
 // Le camp des naufragés : cercle de pierres, bûches, sièges, tente de toile,
@@ -876,9 +833,9 @@ function creerIlots() {
   return new THREE.Group().add(fusionner(parties, { ombre: false }), creerPalmiers(palmiers, hauteurIlot));
 }
 
-// Quatre ambiances : le jour pour créer son perso, le crépuscule de la
-// préparation, la nuit pendant les manches, et l'Illumination du protégé qui
-// éclaire toute la carte.
+// Les ambiances : le jour pour créer son perso, la nuit des assauts et du
+// boss, l'illumination des accalmies qui éclaire toute la carte (le
+// crépuscule reste disponible).
 const AMBIANCES = {
   jour: {
     ciel: '#ffffff', brouillard: '#cfe7f7', pres: 70, loin: 300,
@@ -973,14 +930,17 @@ export function creerIle(scene) {
     }),
     creerBrume({ rayon: 36, sol: (x, z) => Math.max(hauteurTerrain(x, z), 0.05) }),
   ];
+  const autelIle = creerAutel(AUTEL_ILE, hauteurTerrain(AUTEL_ILE.x, AUTEL_ILE.z));
   const decors = {
-    ile: new THREE.Group().add(
+    ile: new THREE.Group().add(autelIle,
       creerTerrain(), mer, ecume, creerPalmiers(), creerRochers(), creerHerbes(), creerCabane(), creerPonton(), ...bouees, ...vieIle,
       tiki, creerBoisFlotte(), creerPetitDecor(), ...(DECOR.epave ? [creerEpave(DECOR.epave)] : []),
       creerVegetationIle(), barque, feux, reverberes.groupe, creerIlots(), ...(camp ? [camp.groupe] : []), ...(tour ? [tour.groupe] : []),
     ),
-    chateau: creerChateau(),
+    village: creerVillage(),
+    foret: creerForet(),
   };
+  decors.ile.userData.autel = autelIle;
   let tempsIle = 0;
   decors.ile.userData.animer = (dt, nuit) => {
     tempsIle += dt;
@@ -989,6 +949,7 @@ export function creerIle(scene) {
     feux.userData.animer(dt, nuit);
     ecume.userData.animer(tempsIle);
     barque.userData.animer(tempsIle);
+    autelIle.userData.animer(dt, nuit);
   };
   // Les lampes des décors restent dans la scène, même quand leur décor est
   // caché (éteintes) : le nombre de lumières ne change pas d'une carte à
@@ -1053,6 +1014,10 @@ export function creerIle(scene) {
     },
     // Décor de la carte d'indice donné (CARTES dans monde.js).
     carte: montrerCarte,
+    // L'autel de chaque carte : 'repos', 'rituel', 'boss' ou 'eteint'.
+    autel(mode) {
+      for (const decor of Object.values(decors)) decor.userData.autel?.userData.regler(mode);
+    },
     // De 0 (nuit noire) à 1 (plein jour), d'après la lumière du ciel : le
     // halo de post.js s'y règle.
     get jour() {

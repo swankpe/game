@@ -27,9 +27,11 @@ installer : on s'envoie un lien.
   d'une carte à l'autre : zombies plus nombreux, plus rapides, plus
   résistants, davantage de types spéciaux. Traîner avant d'appeler le boss,
   c'est gagner de l'argent mais affronter des assauts plus durs.
-- **La nuit est noire** : au-delà de quelques mètres, on ne voit que ce
-  qu'éclaire la lanterne de Lucie (elle suit le zombie le plus proche) et les
-  yeux des zombies qui luisent.
+- **La nuit est noire, Lucie l'éclaire** : sa lanterne ne s'éteint jamais.
+  Elle répand un halo tout autour d'elle (16 m au départ) et son faisceau
+  suit le zombie le plus proche. Dans son halo, on voit bien plus loin (la
+  nuit recule jusqu'à 1,6 fois) : restez près d'elle pour voir venir les
+  zombies. Loin d'elle, on ne voit que les yeux des zombies qui luisent.
 - **Porter Lucie** : en la portant, on ne tire pas et on avance moins vite.
   Pendant le rituel, elle ne quitte pas l'autel.
 - **Les zombies attaquent aussi les défenseurs** : celui qui passe à moins de
@@ -127,8 +129,9 @@ vaut y aller pendant l'accalmie.
 
 L'armurerie vend aussi la **lanterne de Lucie**, pour toute l'équipe : trois
 niveaux (300, 600 puis 1 000 $), chacun rend le faisceau plus long, plus
-large et plus fort, et repousse la nuit (on voit à 22 m au départ, 44 m au
-niveau 3).
+large et plus fort, élargit son halo (16 m au départ, 28 m au niveau 3) et
+repousse la nuit (on voit à 22 m au départ, 44 m au niveau 3, et plus loin
+encore près d'elle).
 
 **L'inventaire**, au milieu en bas de l'écran, ne montre que ce que tu
 possèdes : tes armes (touches **1**, **2**… dans l'ordre, ou la molette),

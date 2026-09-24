@@ -5,7 +5,7 @@ import {
   ARMES, ARMES_DEPART, BONUS_BOSS, BOSS, CYCLE, DISTANCE_PORTER, DUREE_DEFAITE, DUREE_VICTOIRE, ESSAI, ETOILES,
   EXPLOSION_BOUFFI, HAUTEUR_TETE, JOUEUR, LANTERNE, NIVEAU_LANTERNE_MAX, PV_MONSTRE, PV_PROTEGE, POTEAU_DEPART,
   TYPES_ZOMBIES, VIVRES, armeAmelioree, danger, degatsExplosion, indiceArme, indiceType, indiceVivre, monstresParMinute,
-  poidsTypes, positionPortee, premierTouche, pvBoss, pvMonstre, renfortsBoss, tirerType, vitesseMonstre,
+  poidsTypes, positionPortee, premierTouche, pvBoss, pvMonstre, renfortsBoss, tirerType, visionNocturne, vitesseMonstre,
 } from '../src/regles.js';
 import { BOUTIQUE, CABANE, CARTES, carteDEtape, estPraticable, rayonIle, resoudreCollisions } from '../src/monde.js';
 import { dansObstacle } from '../src/carte-ouverte.js';
@@ -907,6 +907,17 @@ test('la lanterne s’améliore à l’armurerie, pour toute l’équipe, trois 
   assert.equal(s.comptes.a.argent, 5000 - LANTERNE.prix.reduce((a, b) => a + b));
   assert.equal(sim.instantane().la, NIVEAU_LANTERNE_MAX);
   assert.ok(LANTERNE.brouillard.every((v, i, t) => i === 0 || v > t[i - 1]), 'chaque niveau fait voir plus loin');
+});
+
+test('Lucie éclaire les environs : dans son halo, la nuit recule', () => {
+  assert.equal(visionNocturne(0, 0), LANTERNE.brouillard[0] * LANTERNE.recul, 'tout près d’elle');
+  assert.equal(visionNocturne(0, LANTERNE.rayon[0] * 0.5), LANTERNE.brouillard[0] * LANTERNE.recul);
+  assert.equal(visionNocturne(0, LANTERNE.rayon[0]), LANTERNE.brouillard[0], 'au bord du halo');
+  assert.equal(visionNocturne(0, 80), LANTERNE.brouillard[0], 'loin d’elle : la nuit ordinaire');
+  const milieu = visionNocturne(0, LANTERNE.rayon[0] * 0.75);
+  assert.ok(milieu > LANTERNE.brouillard[0] && milieu < LANTERNE.brouillard[0] * LANTERNE.recul);
+  assert.ok(visionNocturne(3, 0) > visionNocturne(0, 0), 'la lanterne améliorée voit plus loin');
+  assert.ok(LANTERNE.rayon.every((v, i, t) => i === 0 || v > t[i - 1]), 'et son halo s’élargit');
 });
 
 test('lanterne, étoiles et blessures passent d’un hôte à l’autre, vérifiées', () => {

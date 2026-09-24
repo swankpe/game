@@ -279,6 +279,14 @@ Pièges :
   `rendu-foret.js`, et `cartes.test.js` liste les genres dessinés. Ce qu'on
   enjambe (herbe, fleurs, fougères, champignons, rondins du feu de camp)
   n'est pas un obstacle.
+- **Lucie éclaire les environs** (elle a repris le rôle du joueur protégé
+  des débuts) : sa lanterne ne s'éteint jamais, un halo (`PointLight` haut
+  au-dessus d'elle, rayon `LANTERNE.rayon`, sans ombre) éclaire le sol
+  autour d'elle, et `visionNocturne()` repousse le brouillard de la nuit
+  quand on est dans ce halo. Le brouillard suit la caméra : sans ce recul,
+  la lumière de Lucie ne servait qu'à celui qui se tenait contre elle. Ses
+  matières ont `fog: false` : de loin, elle reste visible, éclairée par son
+  halo.
 - L'autel ne bloque rien et la simulation ne connaît pas son disque de
   pierre : `jeu.js` relève Lucie de `HAUTEUR_AUTEL` quand elle y est posée,
   pour qu'elle s'y tienne debout.

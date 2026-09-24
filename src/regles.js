@@ -115,17 +115,31 @@ export const VIVRES = [
 ];
 export const indiceVivre = (id) => VIVRES.findIndex((v) => v.id === id);
 
-// La lanterne du protégé, améliorable à l'armurerie pour toute l'équipe :
+// La lanterne de Lucie, améliorable à l'armurerie pour toute l'équipe :
 // prix du niveau suivant, puis par niveau (0 à 3) la portée du faisceau (m),
-// son demi-angle (rad), sa puissance, et la distance où la nuit avale tout
-// (brouillard, m). La nuit est noire : c'est la lanterne qui fait voir loin.
+// son demi-angle (rad), sa puissance, la distance où la nuit avale tout
+// (brouillard, m), et le rayon du halo qu'elle répand tout autour d'elle
+// (rayon, m). Dans ce halo, la nuit recule encore (jusqu'à recul fois plus
+// loin, tout près d'elle) : on voit venir les zombies en restant près d'elle.
 export const LANTERNE = {
   prix: [300, 600, 1000],
   portee: [36, 46, 56, 68],
   angle: [0.45, 0.55, 0.65, 0.76],
   puissance: [1, 1.2, 1.45, 1.7],
   brouillard: [22, 28, 35, 44],
+  rayon: [16, 20, 24, 28],
+  recul: 1.6,
 };
+
+// Jusqu'où l'on voit la nuit (m), selon le niveau de la lanterne et la
+// distance à Lucie : plus loin dans son halo, au mieux recul fois plus loin
+// à moins de la moitié du rayon.
+export function visionNocturne(niveau, distance) {
+  const n = Math.min(Math.max(niveau | 0, 0), LANTERNE.rayon.length - 1);
+  const r = LANTERNE.rayon[n];
+  const proche = Math.min(1, Math.max(0, (r - distance) / (r * 0.5)));
+  return LANTERNE.brouillard[n] * (1 + (LANTERNE.recul - 1) * proche);
+}
 export const NIVEAU_LANTERNE_MAX = LANTERNE.prix.length;
 
 // Les joueurs aussi sont attaqués. Un zombie à moins de aggro mètres d'un

@@ -39,10 +39,12 @@ function habillerLucie(lucie) {
 }
 
 export const HAUTEUR_LANTERNE = 2.35;
-// Intensité du faisceau et de la lueur (en candelas, unités physiques de
-// Three.js), au niveau 0 de la lanterne (LANTERNE dans regles.js).
+// Intensité du faisceau et du halo (en candelas, unités physiques de
+// Three.js), au niveau 0 de la lanterne (LANTERNE dans regles.js). Le halo
+// tombe de haut, sur Lucie et tout autour d'elle (LANTERNE.rayon) : c'est
+// elle qui éclaire les environs.
 const FAISCEAU = 170;
-const LUEUR = 7;
+const HALO = 34;
 
 export function creerPoteau(scene) {
   const bois = new THREE.MeshStandardMaterial({ color: '#5a3d2b', flatShading: true, roughness: 0.95 });
@@ -95,8 +97,10 @@ export function creerPoteau(scene) {
   lanterne.add(faisceau, visee);
   faisceau.target = visee;
 
-  const lueur = new THREE.PointLight('#ffcf85', 0, 9, 1.6);
-  lueur.position.set(0, HAUTEUR_LANTERNE - 0.2, 0.3);
+  // Le halo : haut au-dessus d'elle, pour que la lumière tombe large et
+  // régulière (sans éblouir à ses pieds), jusqu'au rayon de la lanterne.
+  const lueur = new THREE.PointLight('#ffe2b0', 0, LANTERNE.rayon[0], 1);
+  lueur.position.set(0, 5.5, 0.4);
   groupe.add(lueur);
 
   let allumage = 0;
@@ -121,6 +125,12 @@ export function creerPoteau(scene) {
   bulle.visible = false;
   groupe.add(bulle);
 
+  // Le brouillard de la nuit ne l'avale jamais : de loin, Lucie et son
+  // poteau restent visibles, éclairés par leur lueur.
+  groupe.traverse((o) => {
+    if (o.isMesh) o.material.fog = false;
+  });
+
   scene.add(groupe);
 
   return {
@@ -141,7 +151,7 @@ export function creerPoteau(scene) {
     allumer(niveau) {
       allumage = niveau;
       faisceau.intensity = FAISCEAU * niveau * puissance;
-      lueur.intensity = LUEUR * niveau * puissance;
+      lueur.intensity = HALO * niveau * puissance;
       if (niveau > 0) verre.color.copy(vitreAllumee);
       else verre.color.set('#8a7a5a');
     },
@@ -154,6 +164,7 @@ export function creerPoteau(scene) {
       faisceau.angle = LANTERNE.angle[n];
       faisceau.shadow.camera.far = LANTERNE.portee[n];
       faisceau.shadow.camera.updateProjectionMatrix();
+      lueur.distance = LANTERNE.rayon[n];
       puissance = LANTERNE.puissance[n];
       vitre.scale.setScalar(1 + n * 0.12);
       this.allumer(allumage);

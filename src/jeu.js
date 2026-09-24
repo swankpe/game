@@ -21,6 +21,7 @@ import {
   ARMES, ARMES_DEPART, BONUS_BOSS, BONUS_DEGATS_MAX, BOSS, ESSAI, DISPERSION_MOUVEMENT, DISPERSION_SAUT, DISTANCE_BOUTIQUE,
   DISTANCE_PORTER, ETOILES, EXPLOSION_BOUFFI, JOUEUR, LANTERNE, MULTIPLICATEUR_TETE, NIVEAU_LANTERNE_MAX, NOM_PROTEGE,
   POTEAU_DEPART, PV_PROTEGE, TYPES_ZOMBIES, VIVRES, armeAmelioree, degatsExplosion, indiceArme, indiceVivre, positionPortee,
+  visionNocturne,
 } from './regles.js';
 import { PHASES_ECLAIREES, creerSimulation, normaliserMonde } from './simulation.js';
 import {
@@ -845,7 +846,8 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       visee.tangage += (-0.22 - visee.tangage) * (1 - Math.exp(-dt * 2));
     }
     poteau.orienter(visee.lacet, visee.tangage);
-    poteau.allumer(monde.phase === 'attente' ? 0 : 1);
+    // Sa lanterne ne s'éteint jamais, au camp non plus.
+    poteau.allumer(1);
     poteau.animer(dt);
     return { x, y, z, leve };
   }
@@ -1420,7 +1422,7 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
         if (id === porteur) return 'porte';
         return 'arme';
       });
-      placerPoteau(dt);
+      const poteauVu = placerPoteau(dt);
       placerMarqueAutel();
       chuteVue += ((aTerre() ? 1 : 0) - chuteVue) * (1 - Math.exp(-dt * 6));
       if (fps) {
@@ -1441,10 +1443,11 @@ export function creerJeu({ scene, camera, canvas, rendu, ile, clavier, joueur, a
       chiffres.mettreAJour(dt);
       etoiles.appliquer(monde.phase === 'attente' ? [] : monde.etoiles ?? []);
       etoiles.mettreAJour(dt);
-      // La lanterne améliorée éclaire plus loin, et la nuit recule d'autant.
+      // La lanterne améliorée éclaire plus loin, et la nuit recule d'autant ;
+      // dans le halo de Lucie, plus encore.
       const niveauLanterne = monde.lanterne ?? 0;
       poteau.ameliorer(niveauLanterne);
-      ile.vision(LANTERNE.brouillard[niveauLanterne]);
+      ile.vision(visionNocturne(niveauLanterne, Math.hypot(joueur.etat.x - poteauVu.x, joueur.etat.z - poteauVu.z)));
 
       // Tirs des autres, rejoués au fil de l'eau.
       if (tirsDifferes.length) {
